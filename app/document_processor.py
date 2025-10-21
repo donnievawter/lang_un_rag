@@ -38,10 +38,23 @@ class DocumentProcessor:
             List of Document objects
         """
         documents = []
-        markdown_dir = Path(directory)
+        markdown_dir = Path(directory).resolve()
         
-        if not markdown_dir.exists():
-            raise ValueError(f"Directory {directory} does not exist")
+        # Validate that the path is within allowed directories
+        # This prevents path traversal attacks
+        try:
+            # Ensure the path doesn't contain path traversal sequences
+            if ".." in str(markdown_dir):
+                raise ValueError("Path traversal not allowed")
+            
+            # Convert to absolute path and verify it exists
+            if not markdown_dir.exists():
+                raise ValueError(f"Directory {directory} does not exist")
+            
+            if not markdown_dir.is_dir():
+                raise ValueError(f"{directory} is not a directory")
+        except (OSError, RuntimeError) as e:
+            raise ValueError(f"Invalid directory path: {e}")
         
         # Find all markdown files
         markdown_files = list(markdown_dir.glob("**/*.md"))

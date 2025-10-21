@@ -1,5 +1,6 @@
 """FastAPI application for the RAG system."""
 from typing import Optional, List, Dict, Any
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -17,6 +18,55 @@ app = FastAPI(
 # Initialize components
 document_processor = DocumentProcessor()
 vector_store = VectorStore()
+
+
+def validate_directory(directory: Optional[str]) -> str:
+    """Validate and sanitize directory path.
+    
+    Args:
+        directory: Directory path to validate
+        
+    Returns:
+        Validated directory path
+        
+    Raises:
+        HTTPException: If directory path is invalid
+    """
+    # Use default if not provided
+    if directory is None:
+        return settings.markdown_dir
+    
+    try:
+        # Resolve to absolute path
+        dir_path = Path(directory).resolve()
+        
+        # Check for path traversal
+        if ".." in str(directory):
+            raise HTTPException(
+                status_code=400,
+                detail="Path traversal not allowed"
+            )
+        
+        # Ensure it's under the configured markdown directory or is the configured directory
+        allowed_base = Path(settings.markdown_dir).resolve()
+        try:
+            dir_path.relative_to(allowed_base)
+        except ValueError:
+            # If not under allowed_base, only allow if it's the exact configured path
+            if dir_path != allowed_base:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Directory must be within {settings.markdown_dir}"
+                )
+        
+        return str(dir_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid directory path: {str(e)}"
+        )
 
 
 class IndexResponse(BaseModel):
@@ -82,8 +132,8 @@ async def index_documents(directory: Optional[str] = None):
         IndexResponse with status and counts
     """
     try:
-        # Process documents
-        target_dir = directory or settings.markdown_dir
+        # Validate and process documents
+        target_dir = validate_directory(directory)
         chunks = document_processor.process_directory(target_dir)
         
         if not chunks:
@@ -122,8 +172,8 @@ async def reindex_documents(directory: Optional[str] = None):
         ReindexResponse with status and counts
     """
     try:
-        # Process documents
-        target_dir = directory or settings.markdown_dir
+        # Validate and process documents
+        target_dir = validate_directory(directory)
         chunks = document_processor.process_directory(target_dir)
         
         if not chunks:
