@@ -1,6 +1,5 @@
 """FastAPI application for the RAG system."""
 from typing import Optional, List, Dict, Any
-from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -20,53 +19,7 @@ document_processor = DocumentProcessor()
 vector_store = VectorStore()
 
 
-def validate_directory(directory: Optional[str]) -> str:
-    """Validate and sanitize directory path.
-    
-    Args:
-        directory: Directory path to validate
-        
-    Returns:
-        Validated directory path
-        
-    Raises:
-        HTTPException: If directory path is invalid
-    """
-    # Use default if not provided
-    if directory is None:
-        return settings.markdown_dir
-    
-    try:
-        # Resolve to absolute path
-        dir_path = Path(directory).resolve()
-        
-        # Check for path traversal
-        if ".." in str(directory):
-            raise HTTPException(
-                status_code=400,
-                detail="Path traversal not allowed"
-            )
-        
-        # Ensure it's under the configured markdown directory or is the configured directory
-        allowed_base = Path(settings.markdown_dir).resolve()
-        try:
-            dir_path.relative_to(allowed_base)
-        except ValueError:
-            # If not under allowed_base, only allow if it's the exact configured path
-            if dir_path != allowed_base:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Directory must be within {settings.markdown_dir}"
-                )
-        
-        return str(dir_path)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid directory path: {str(e)}"
-        )
+
 
 
 class IndexResponse(BaseModel):
@@ -121,25 +74,20 @@ async def root():
 
 
 @app.post("/index", response_model=IndexResponse)
-async def index_documents(directory: Optional[str] = None):
-    """Index markdown documents from the specified directory.
-    
-    Args:
-        directory: Optional path to markdown directory.
-                  Defaults to MARKDOWN_DIR from settings.
+async def index_documents():
+    """Index markdown documents from the configured directory.
     
     Returns:
         IndexResponse with status and counts
     """
     try:
-        # Validate and process documents
-        target_dir = validate_directory(directory)
-        chunks = document_processor.process_directory(target_dir)
+        # Process documents from configured directory
+        chunks = document_processor.process_directory()
         
         if not chunks:
             raise HTTPException(
                 status_code=404,
-                detail=f"No markdown files found in {target_dir}"
+                detail=f"No markdown files found in {settings.markdown_dir}"
             )
         
         # Index documents
@@ -147,7 +95,7 @@ async def index_documents(directory: Optional[str] = None):
         
         return IndexResponse(
             status="success",
-            message=f"Successfully indexed documents from {target_dir}",
+            message=f"Successfully indexed documents from {settings.markdown_dir}",
             documents_indexed=result["documents_indexed"],
             chunks_created=len(chunks),
         )
@@ -161,25 +109,20 @@ async def index_documents(directory: Optional[str] = None):
 
 
 @app.post("/reindex", response_model=ReindexResponse)
-async def reindex_documents(directory: Optional[str] = None):
+async def reindex_documents():
     """Clear the existing index and reindex markdown documents.
-    
-    Args:
-        directory: Optional path to markdown directory.
-                  Defaults to MARKDOWN_DIR from settings.
     
     Returns:
         ReindexResponse with status and counts
     """
     try:
-        # Validate and process documents
-        target_dir = validate_directory(directory)
-        chunks = document_processor.process_directory(target_dir)
+        # Process documents from configured directory
+        chunks = document_processor.process_directory()
         
         if not chunks:
             raise HTTPException(
                 status_code=404,
-                detail=f"No markdown files found in {target_dir}"
+                detail=f"No markdown files found in {settings.markdown_dir}"
             )
         
         # Reindex documents
@@ -187,7 +130,7 @@ async def reindex_documents(directory: Optional[str] = None):
         
         return ReindexResponse(
             status="success",
-            message=f"Successfully reindexed documents from {target_dir}",
+            message=f"Successfully reindexed documents from {settings.markdown_dir}",
             documents_indexed=result["documents_indexed"],
             chunks_created=len(chunks),
         )

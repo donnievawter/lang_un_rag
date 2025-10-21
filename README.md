@@ -84,10 +84,9 @@ Returns health status of the API.
 ```bash
 POST /index
 ```
-Index markdown files into ChromaDB. Creates embeddings and stores them in the vector database.
+Index markdown files from the configured directory into ChromaDB. Creates embeddings and stores them in the vector database.
 
-**Query Parameters:**
-- `directory` (optional): Path to markdown directory (defaults to `MARKDOWN_DIR` from settings)
+The directory is configured via the `MARKDOWN_DIR` environment variable.
 
 **Example:**
 ```bash
@@ -108,10 +107,9 @@ curl -X POST "http://localhost:8000/index"
 ```bash
 POST /reindex
 ```
-Clear the existing index and reindex all documents.
+Clear the existing index and reindex all documents from the configured directory.
 
-**Query Parameters:**
-- `directory` (optional): Path to markdown directory (defaults to `MARKDOWN_DIR` from settings)
+The directory is configured via the `MARKDOWN_DIR` environment variable.
 
 **Example:**
 ```bash

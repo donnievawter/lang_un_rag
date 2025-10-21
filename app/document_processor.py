@@ -96,19 +96,13 @@ class DocumentProcessor:
         
         return chunks
     
-    def process_directory(self, directory: str = None) -> List[Document]:
-        """Load and chunk all markdown files from a directory.
+    def process_directory(self) -> List[Document]:
+        """Load and chunk all markdown files from the configured directory.
         
-        Args:
-            directory: Path to directory containing markdown files.
-                      Defaults to settings.markdown_dir
-            
         Returns:
             List of chunked Document objects
         """
-        if directory is None:
-            directory = settings.markdown_dir
-        
+        directory = settings.markdown_dir
         documents = self.load_markdown_files(directory)
         chunks = self.chunk_documents(documents)
         
