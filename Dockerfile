@@ -16,13 +16,15 @@ ENV PATH="/root/.cargo/bin:$PATH"
 
 # Copy project files
 COPY pyproject.toml ./
+COPY requirements.txt ./
 COPY app ./app
 
 # Create necessary directories
 RUN mkdir -p markdown_files chroma_db
 
-# Install dependencies using uv
-RUN uv pip install --system --no-cache -r pyproject.toml
+# Install dependencies using uv (with fallback to pip)
+RUN uv pip install --system --no-cache -r requirements.txt || \
+    pip install --no-cache-dir -r requirements.txt
 
 # Expose the FastAPI port
 EXPOSE 8000
