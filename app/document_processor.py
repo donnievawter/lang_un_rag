@@ -94,12 +94,14 @@ class DocumentProcessor:
         """
         chunks = self.text_splitter.split_documents(documents)
         
-        # Add chunk metadata
+        # Add chunk metadata; make chunk_id include source to keep it unique across files
         for i, chunk in enumerate(chunks):
-            chunk.metadata["chunk_id"] = i
+            source = chunk.metadata.get("source", "unknown")
+            # Use a composite id so chunk ids don't collide across multiple documents
+            chunk.metadata["chunk_id"] = f"{source}::{i}"
         
         return chunks
-    
+            
     def process_directory(self) -> List[Document]:
         """Load and chunk all markdown files from the configured directory.
         

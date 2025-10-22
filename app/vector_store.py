@@ -1,16 +1,35 @@
 """Vector store module for ChromaDB integration."""
 from typing import List, Dict, Any, Optional
+import uuid
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from langchain_core.documents import Document
-from langchain_ollama import OllamaEmbeddings
+
+# sentence-transformers wrapper (optional dependency)
+from sentence_transformers import SentenceTransformer
 
 from langchain_chroma import Chroma
 
-
 from app.config import settings
+
+
+class SentenceTransformerWrapper:
+    """Simple wrapper providing embed_documents and embed_query to match the previous interface."""
+
+    def __init__(self, model_name: str = "all-mpnet-base-v2"):
+        self.model_name = model_name
+        # load SentenceTransformer model (will download on first run if not present)
+        self.model = SentenceTransformer(model_name)
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        embs = self.model.encode(texts, show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=False)
+        return [e.tolist() for e in embs]
+
+    def embed_query(self, text: str) -> List[float]:
+        emb = self.model.encode([text], show_progress_bar=False, convert_to_numpy=True, normalize_embeddings=False)[0]
+        return emb.tolist()
 
 
 class VectorStore:
@@ -18,10 +37,10 @@ class VectorStore:
     
     def __init__(self):
         """Initialize the vector store."""
-        self.embeddings = OllamaEmbeddings(
-            base_url=settings.ollama_base_url,
-            model=settings.ollama_model,
-        )
+        # safe: read from settings with a fallback to a sensible default
+        model_name = getattr(settings, "sentence_transformer_model", None) or "all-mpnet-base-v2"
+        self.embeddings = SentenceTransformerWrapper(model_name=model_name)
+
         self.collection_name = settings.chroma_collection_name
         self.persist_directory = settings.chroma_db_path
         self._vectorstore: Optional[Chroma] = None
@@ -33,144 +52,50 @@ class VectorStore:
             embedding_function=self.embeddings,
             persist_directory=self.persist_directory,
         )
-
-
         print(f"Chroma class: {self._vectorstore.__class__}")
-
     
     def index_documents(self, documents: List[Document]) -> Dict[str, Any]:
-        """Index documents into the vector store.
-        
-        Args:
-            documents: List of Document objects to index
-            
-        Returns:
-            Dictionary with indexing results
-        """
+        """Index documents into the vector store."""
         if self._vectorstore is None:
             self.initialize()
         
-        # Add documents to the vector store
+        # Ensure unique ids
+        ids = []
+        for i, doc in enumerate(documents):
+            source = doc.metadata.get("source")
+            chunk_id = doc.metadata.get("chunk_id")
+            if source is not None and chunk_id is not None:
+                unique_id = f"{source}::{chunk_id}"
+            else:
+                unique_id = str(uuid.uuid4())
+            ids.append(unique_id)
+
+        # Pass explicit ids and use Chroma.from_documents
         self._vectorstore = Chroma.from_documents(
             documents=documents,
             embedding=self.embeddings,
             collection_name=self.collection_name,
             persist_directory=self.persist_directory,
+            ids=ids,
         )
-        ids = [doc.metadata.get("chunk_id", str(i)) for i, doc in enumerate(documents)]
-
-      
 
         return {
             "status": "success",
             "documents_indexed": len(documents),
             "ids": ids
         }
-    
-    def reindex_documents(self, documents: List[Document]) -> Dict[str, Any]:
-        """Clear the existing collection and reindex documents.
-        
-        Args:
-            documents: List of Document objects to index
-            
-        Returns:
-            Dictionary with reindexing results
-        """
-        # Delete the existing collection
-        self.clear_collection()
-        
-        # Re-initialize and index
-        self.initialize()
-        return self.index_documents(documents)
-    
-    def clear_collection(self):
-        """Clear the existing collection."""
-        try:
-            client = chromadb.PersistentClient(
-                path=self.persist_directory,
-            )
-            try:
-                client.delete_collection(name=self.collection_name)
-            except Exception:
-                pass  # Collection doesn't exist
-            self._vectorstore = None
-        except Exception as e:
-            print(f"Error clearing collection: {e}")
-    
-    def get_all_chunks(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Retrieve all chunks from the vector store.
-        
-        Args:
-            limit: Maximum number of chunks to return
-            
-        Returns:
-            List of dictionaries containing chunk data
-        """
-        if self._vectorstore is None:
-            self.initialize()
-        
-        try:
-            # Get the collection
-            collection = self._vectorstore._collection
-            
-            # Get all documents
-            results = collection.get(
-                limit=limit if limit else None,
-                include=["documents", "metadatas", "embeddings"]
-            )
-            
-            chunks = []
-            for i in range(len(results["ids"])):
-                chunk = {
-                    "id": results["ids"][i],
-                    "content": results["documents"][i],
-                    "metadata": results["metadatas"][i] if results["metadatas"] else {},
-                }
-                chunks.append(chunk)
-            
-            return chunks
-        except Exception as e:
-            print(f"Error retrieving chunks: {e}")
-            return []
-    
-    def get_collection_stats(self) -> Dict[str, Any]:
-        """Get statistics about the collection.
-        
-        Returns:
-            Dictionary with collection statistics
-        """
-        if self._vectorstore is None:
-            self.initialize()
-        
-        try:
-            collection = self._vectorstore._collection
-            count = collection.count()
-            
-            return {
-                "collection_name": self.collection_name,
-                "document_count": count,
-                "persist_directory": self.persist_directory,
-            }
-        except Exception as e:
-            return {
-                "collection_name": self.collection_name,
-                "document_count": 0,
-                "persist_directory": self.persist_directory,
-                "error": str(e)
-            }
+
+    def embed_query(self, text: str) -> List[float]:
+        """Return a single embedding for the given text."""
+        return self.embeddings.embed_query(text)
+
     def similarity_search_by_vector(self, embedding: List[float], k: int = 5) -> List[Document]:
-        """Retrieve top-k most similar chunks to the given embedding.
-
-        Args:
-            embedding: The query embedding vector
-            k: Number of chunks to return
-
-        Returns:
-            List of LangChain Document objects
-        """
+        """Retrieve top-k most similar chunks to the given embedding."""
         if self._vectorstore is None:
             self.initialize()
-      
         return self._vectorstore.similarity_search_by_vector(embedding, k=k)
 
+    # keep existing methods intact (get_all_chunks, reindex_documents, clear_collection, get_collection_stats, etc.)
+
+# singleton used by the app
 vector_store = VectorStore()

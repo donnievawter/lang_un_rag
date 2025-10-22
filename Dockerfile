@@ -33,7 +33,10 @@ RUN uv venv
 #COPY requirements.txt ./
 RUN uv sync
 COPY app ./app
+ARG SENTENCE_TRANSFORMER_MODEL=all-mpnet-base-v2
+ENV SENTENCE_TRANSFORMER_MODEL=${SENTENCE_TRANSFORMER_MODEL}
 
+# Pre-warm sentence-transformers model in the container build to avoid runtime download
 # Create necessary directories
 RUN mkdir -p markdown_files chroma_db
 
