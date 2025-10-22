@@ -1,0 +1,17 @@
+services:
+  watcher:
+    build:
+      context: .
+    restart: always
+    command: >
+      /app/.venv/bin/python3 /opt/dockerapps/lang_un_rag/scripts/watch_and_index.py
+      --watch-dir /app/markdown_files
+      --endpoint https://rag.hlab.cam/index
+      --debounce 60
+      --poll-interval 5
+      --wait-stable 2
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./:/opt/dockerapps/lang_un_rag:rw
+      - ./markdown_docs:/app/markdown_files
