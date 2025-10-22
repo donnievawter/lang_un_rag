@@ -1,219 +1,85 @@
-# Implementation Summary
+# Implementation Notes
 
-## Project Overview
+This document explains the main components, design decisions, and operational details for lang_un_rag.
 
-This project implements a complete Retrieval-Augmented Generation (RAG) system for indexing and querying markdown documents. The system is designed to run locally with all components containerized.
+## Components
 
-## Requirements Fulfilled
+1. app/document_processor.py
+   - Loads files from the configured directory and selects an appropriate loader per file type (Unstructured loaders, langchain loaders, or custom logic).
+   - Performs text extraction, optional OCR steps (images / scanned PDFs), and splits text into chunks using a LangChain text splitter (configurable chunk_size and chunk_overlap).
+   - Attaches metadata to each chunk: `source` (filename), `chunk_id` (index), and other file metadata.
 
-✅ **Python project** - Built with Python 3.11+
-✅ **Parse markdown files** - Uses `unstructured` library for markdown parsing
-✅ **ChromaDB integration** - Vector database for storing embeddings
-✅ **LangChain** - Framework for document processing and chunking
-✅ **Ollama** - Local LLM for embeddings (no cloud dependencies)
-✅ **UV package manager** - Modern Python package management
-✅ **Environment configuration** - Uses `.env` file for configuration
-✅ **Docker containerization** - Full Docker support with docker-compose
-✅ **Network-based Ollama** - Connects to Ollama running on host machine
-✅ **FastAPI with required endpoints** - `/index`, `/reindex`, `/get_chunks`
+2. app/vector_store.py
+   - Wrapper around Chroma (LangChain/Chroma integration).
+   - Provides:
+     - `initialize()` — create/load the Chroma collection
+     - `index_documents(documents)` — build/overwrite collection from documents (preserves ids passed)
+     - `reindex_documents(documents)` — clear + index (calls `clear_collection()` then `index_documents()`)
+     - `get_all_chunks(limit=None)` — list all chunks in the collection; returns list of dicts with `id`, `content`, `metadata`
+     - `list_chunks(limit=None)` — alias of `get_all_chunks`
+     - `clear_collection()` — attempt to delete all items using collection API; falls back to deleting the persist directory if needed
+     - `get_collection_stats()` — returns collection_name, persist_directory, document_count
+     - `embed_query(text)` — returns embedding for queries using configured embedding provider
+     - `similarity_search_by_vector(embedding, k)` — returns top-k similar Document objects
+   - Implementation notes:
+     - Defensive access to underlying Chroma collection: `_vectorstore._collection`, `_vectorstore.client`, or `_vectorstore` itself (covers multiple wrapper shapes).
+     - `get_all_chunks` calls the Chroma `get()` API without including `"ids"` in the `include` list (some chroma versions return ids by default and reject "ids" in include).
+     - `clear_collection` first tries collection.delete variants; if those fail it removes the persist directory and resets `_vectorstore`.
 
-## Architecture
+3. app/main.py
+   - FastAPI app with endpoints:
+     - `/index` — uses DocumentProcessor to build chunks and calls `vector_store.index_documents()`
+     - `/reindex` — calls DocumentProcessor then `vector_store.reindex_documents()`
+     - `/get_chunks` — calls `vector_store.get_all_chunks()` and returns results
+     - `/stats` — `vector_store.get_collection_stats()`
+     - `/query` — uses `app/query_chunks.py` (which uses `vector_store.embed_query()` + `vector_store.similarity_search_by_vector()`)
 
-### Components
+4. scripts/watch_and_index.py
+   - PollingObserver-based watcher with a DebouncedHandler:
+     - Waits for file stabilization (size unchanged) to avoid processing partial writes.
+     - Debounces triggers using a configurable debounce window.
+     - When triggered, posts `json: {}` to the configured `--endpoint` with `Content-Type: application/json`.
+     - Retries with exponential backoff on transient network errors.
+   - CLI options: `--watch-dir`, `--endpoint`, `--debounce`, `--poll-interval`, `--wait-stable`, `--insecure`.
 
-1. **Document Processor** (`app/document_processor.py`)
-   - Loads markdown files from configured directory
-   - Chunks documents using LangChain's RecursiveCharacterTextSplitter
-   - Maintains document metadata (source, filename, chunk_id)
+5. scripts/wait_and_exec.sh
+   - Small wrapper to avoid startup races when using `uv` to create a project venv in a volume that might not exist immediately.
+   - Waits for candidate python interpreters to appear and prefer the one with `requests` and `watchdog` available.
 
-2. **Vector Store** (`app/vector_store.py`)
-   - Manages ChromaDB integration
-   - Creates embeddings using Ollama
-   - Handles indexing, reindexing, and retrieval operations
+## File type handling & loaders
 
-3. **FastAPI Application** (`app/main.py`)
-   - REST API with multiple endpoints
-   - Pydantic models for request/response validation
-   - Comprehensive error handling
+- The processor selects loader based on extension/heuristics:
+  - Markdown, HTML, plain text: Unstructured/markdown loader or simple open/read
+  - PDF: pdfplumber/pypdf fallback
+  - Office: python-docx/pptx readers
+  - Images: use pillow + pytesseract (and pdf2image when converting PDF pages)
+- The system is extensible: add loaders and register them in `document_processor.py`.
 
-4. **Configuration** (`app/config.py`)
-   - Pydantic Settings for type-safe configuration
-   - Environment variable loading from `.env` file
+## Operational considerations
 
-### API Endpoints
+- Watcher:
+  - Use PollingObserver for NFS mounts.
+  - Keep `--debounce` high enough for large copy operations (e.g., 30–120s depending on source).
+  - Ensure network egress from watcher to the index endpoint and TLS trust (ca-certificates).
+- Venv & startup:
+  - Using `uv venv`/`uv sync` is the recommended dev flow; the watcher startup wrapper prevents race conditions when venv is created on a shared mount.
+  - When building images, prefer creating the venv at a path outside of any repo-mount to avoid overlay issues (e.g., `/app/.venv`).
+- Chroma persistence & backups:
+  - Persist the `CHROMA_DB_PATH` to a Docker volume or host bind mount for durability.
+  - To migrate or back up, copy the persist directory while Chroma is not actively writing or use Chroma export methods if available.
+- Certificates:
+  - If using a reverse proxy with ACME certs (e.g., `rag.hlab.cam`), ensure the proxy reloads after renewal. Containers should have `ca-certificates` installed to validate Let’s Encrypt certs.
 
-- `GET /` - API information and available endpoints
-- `GET /health` - Health check endpoint
-- `POST /index` - Index markdown documents into ChromaDB
-- `POST /reindex` - Clear and reindex all documents
-- `GET /get_chunks` - Retrieve indexed document chunks (with optional limit)
-- `GET /stats` - Get collection statistics
+## Extending the system
 
-## Security Features
+- Add new loaders in `document_processor.py` and include tests to verify extraction.
+- To add new endpoints or helpers, update `app/main.py` and keep vector_store helpers backward compatible.
+- Add CI that runs `uv sync` in the build step or ensures dependencies are installed in a canonical venv path.
 
-- **Path Traversal Prevention**: All file operations are restricted to the configured markdown directory
-- **Input Validation**: Pydantic models validate all API inputs
-- **No User-Controllable Paths**: Directory paths are configuration-only, not exposed via API
-- **CodeQL Verified**: Passed security scanning with zero vulnerabilities
+## Tests
 
-## Configuration
+- Add pytest tests in `tests/`. Use `pytest-asyncio` for async endpoint tests.
+- Example:
+  - Start the app locally or in test mode, run `pytest tests/test_main.py::test_get_chunks`
 
-Environment variables (`.env` file):
-
-```
-OLLAMA_BASE_URL=http://host.docker.internal:11434
-OLLAMA_MODEL=llama2
-CHROMA_DB_PATH=./chroma_db
-CHROMA_COLLECTION_NAME=markdown_docs
-MARKDOWN_DIR=./markdown_files
-API_HOST=0.0.0.0
-API_PORT=8000
-```
-
-## Docker Setup
-
-### Dockerfile
-- Based on Python 3.11-slim
-- Installs UV package manager
-- Supports both UV and pip for dependency installation
-- Exposes port 8000
-
-### docker-compose.yml
-- Mounts `markdown_files` and `chroma_db` directories
-- Connects to host Ollama via `host.docker.internal`
-- Environment variable configuration
-- Auto-restart enabled
-
-## Usage
-
-### Quick Start
-
-1. Copy `.env.example` to `.env` and configure
-2. Add markdown files to `markdown_files/` directory
-3. Run with Docker Compose:
-   ```bash
-   ./run.sh
-   # or
-   docker-compose up --build
-   ```
-
-### API Usage Examples
-
-```bash
-# Health check
-curl http://localhost:8000/health
-
-# Index documents
-curl -X POST http://localhost:8000/index
-
-# Get chunks (limit to 10)
-curl "http://localhost:8000/get_chunks?limit=10"
-
-# Reindex documents
-curl -X POST http://localhost:8000/reindex
-
-# Get collection stats
-curl http://localhost:8000/stats
-```
-
-See `examples.sh` for more detailed API examples.
-
-## Development
-
-### Local Development (without Docker)
-
-```bash
-# Install UV
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Create virtual environment
-uv venv
-source .venv/bin/activate
-
-# Install dependencies
-uv pip install -r requirements.txt
-
-# Run the application
-uvicorn app.main:app --reload
-```
-
-### Testing with Ollama
-
-Ensure Ollama is running on your host machine:
-
-```bash
-# Pull a model (if not already done)
-ollama pull llama2
-
-# Ollama should be accessible at http://localhost:11434
-# From Docker, use http://host.docker.internal:11434
-```
-
-## File Structure
-
-```
-lang_un_rag/
-├── app/
-│   ├── __init__.py           # Package initialization
-│   ├── config.py             # Configuration management
-│   ├── document_processor.py # Markdown parsing and chunking
-│   ├── main.py              # FastAPI application
-│   └── vector_store.py      # ChromaDB integration
-├── markdown_files/          # Markdown documents (git-ignored)
-│   └── sample.md           # Example document
-├── chroma_db/              # ChromaDB storage (git-ignored)
-├── .env.example            # Example environment configuration
-├── .gitignore              # Git ignore patterns
-├── Dockerfile              # Docker container definition
-├── docker-compose.yml      # Docker Compose configuration
-├── pyproject.toml          # Python project metadata (UV)
-├── requirements.txt        # Python dependencies (pip fallback)
-├── run.sh                  # Convenience script to start the system
-├── examples.sh             # API usage examples
-└── README.md               # User documentation
-```
-
-## Technology Stack
-
-- **Python 3.11+**: Core language
-- **FastAPI**: Modern web framework for building APIs
-- **LangChain**: Framework for LLM applications and document processing
-- **LangChain Community**: Community integrations for Ollama and ChromaDB
-- **Unstructured**: Document parsing library
-- **ChromaDB**: Vector database for embeddings
-- **Ollama**: Local LLM inference (embeddings)
-- **Pydantic**: Data validation and settings management
-- **Uvicorn**: ASGI server
-- **UV**: Fast Python package manager
-- **Docker**: Containerization platform
-
-## Key Design Decisions
-
-1. **Security First**: Removed user-controllable directory paths to prevent path injection vulnerabilities
-2. **Local-Only**: System designed to work entirely locally without cloud dependencies
-3. **Flexible Deployment**: Supports both Docker and native Python environments
-4. **Configuration-Driven**: All settings managed via environment variables
-5. **Network Architecture**: Ollama runs on host, accessible from container via network
-6. **Persistent Storage**: ChromaDB and markdown files mounted as volumes for data persistence
-
-## Future Enhancements
-
-Potential areas for expansion:
-- Query/search endpoint for semantic search
-- Support for additional document formats (PDF, DOCX)
-- User authentication and authorization
-- Multiple collection support
-- Advanced filtering and metadata queries
-- Batch processing and progress tracking
-- Webhook notifications for indexing completion
-
-## Maintenance
-
-- **Dependencies**: Managed via `pyproject.toml` and `requirements.txt`
-- **Security**: Regularly update dependencies and run security scans
-- **Monitoring**: Health check endpoint available for monitoring
-- **Logs**: Application logs accessible via Docker logs
-
-## Conclusion
-
-This implementation provides a complete, secure, and production-ready RAG system for markdown document processing. All requirements have been met with best practices for security, configuration, and deployment.
+---

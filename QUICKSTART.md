@@ -1,183 +1,206 @@
-# Quick Start Guide
+# lang_un_rag
 
-Get the RAG system up and running in 5 minutes!
+A local Retrieval‑Augmented Generation (RAG) system for indexing and querying documents.  
+This project provides a FastAPI service that extracts text from documents, chunks them, stores embeddings in a ChromaDB collection, and exposes endpoints for indexing, reindexing, enumerating chunks, statistics, and similarity queries. It also includes a robust filesystem watcher sidecar that will trigger indexing automatically when files change.
 
-## Prerequisites
+This README replaces the older documentation and reflects the current repo state (watcher sidecar, startup wrapper, restored vector store helpers, expanded ingestion support).
 
-Before you begin, ensure you have:
+---
 
-1. **Docker and Docker Compose** installed
-2. **Ollama** installed and running on your host machine
+## Highlights
 
-## Step 1: Install Ollama
+- FastAPI API: index, reindex, list chunks, stats, query
+- ChromaDB-backed vector store with local embedding provider (sentence-transformers wrapper)
+- Document ingestion pipeline using Unstructured + LangChain chunking
+- Support for many file types (text, markdown, HTML, PDF, Office, images with OCR)
+- NFS‑safe watcher sidecar (PollingObserver) with debounce and stability checks
+- Dockerized development with `docker compose` and uv-managed venvs
 
-If you haven't already, install Ollama on your host machine:
+---
 
-```bash
-# Visit https://ollama.ai/download for installation instructions
-# Or use this quick install (Linux/Mac):
-curl -fsSL https://ollama.ai/install.sh | sh
-```
+## Supported file types (allowed extensions)
 
-## Step 2: Pull an Ollama Model
+The pipeline attempts to extract text from these types (subject to installed libraries and optional binaries like `tesseract`):
 
-Pull a model for embeddings (llama2 is recommended):
+- Text / markup:
+  - .md, .markdown, .txt, .html, .htm
+- PDFs:
+  - .pdf
+- Office formats:
+  - .docx, .pptx
+  - (legacy .doc/.ppt may require conversion)
+- Images (require OCR to extract text):
+  - .png, .jpg, .jpeg, .tif, .tiff, .bmp, .gif
+- Other:
+  - Any file types supported by Unstructured loaders or added custom loaders
 
-```bash
-ollama pull llama2
-```
+Notes:
+- OCR: image and some scanned PDFs require `tesseract` (binary) + `pytesseract` installed in the image to extract text.
+- If you need additional extensions, update `app/document_processor.py` and add any parser dependencies to pyproject/uv config.
 
-Verify Ollama is running:
+---
 
-```bash
-# Should return the Ollama version
-curl http://localhost:11434/api/version
-```
+## Quickstart — Docker (recommended)
 
-## Step 3: Configure the Application
+Prereqs:
+- Docker
+- `docker compose` (Docker Compose V2 plugin). Avoid the deprecated `docker-compose` binary.
 
-Copy the example environment file:
+1. Build and start the services (application + watcher override):
+   - This repository includes a `docker-compose.override.yml` that defines a `watcher` sidecar for local dev.
+   ```
+   docker compose up -d --build
+   ```
 
-```bash
-cp .env.example .env
-```
+2. Confirm services:
+   ```
+   docker compose ps
+   ```
 
-The default settings should work for most cases. The important settings are:
+3. Watch logs:
+   - App (replace service name with yours):
+     ```
+     docker compose logs -f <app-service-name>
+     ```
+   - Watcher:
+     ```
+     docker compose logs -f watcher
+     ```
 
-```env
-OLLAMA_BASE_URL=http://host.docker.internal:11434
-OLLAMA_MODEL=llama2
-MARKDOWN_DIR=./markdown_files
-```
+4. Manually trigger an index:
+   - Local app:
+     ```
+     curl -X POST "http://localhost:8000/index"
+     ```
+   - If using the reverse proxy / external endpoint:
+     ```
+     curl -X POST "https://rag.hlab.cam/index" -H "Content-Type: application/json" -d '{}'
+     ```
 
-## Step 4: Add Markdown Files
+5. Inspect chunks:
+   ```
+   curl "http://localhost:8000/get_chunks?limit=10" | jq .
+   ```
 
-Create markdown files in the `markdown_files` directory:
+---
 
-```bash
-# The directory already exists with a sample file
-ls markdown_files/
+## Quickstart — Local development (no Docker)
 
-# Add your own markdown files
-cp /path/to/your/docs/*.md markdown_files/
-```
+Prereqs:
+- Python 3.11+
+- Optional: uv (recommended for this repo)
 
-## Step 5: Start the System
+Using uv:
+1. Install uv:
+   ```
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
 
-Use the convenience script to start everything:
+2. Create venv and activate:
+   ```
+   uv venv
+   source .venv/bin/activate
+   ```
 
-```bash
-./run.sh
-```
+3. Sync dependencies:
+   ```
+   uv sync
+   ```
 
-Or use Docker Compose directly:
+4. Run the app:
+   ```
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
 
-```bash
-docker-compose up --build
-```
+If you do not use uv, create a standard venv and install dependencies with pip (pip install -e . or pip install -r requirements.txt).
 
-The API will be available at `http://localhost:8000`
+---
 
-## Step 6: Index Your Documents
+## Configuration (env vars)
 
-Once the system is running, index your markdown files:
+Settings are defined in `app/config.py` (Pydantic). Common env vars:
 
-```bash
-curl -X POST http://localhost:8000/index
-```
+- MARKDOWN_DIR or MARKDOWN_DIR-like setting — directory to scan (default `./markdown_docs`)
+- CHROMA_DB_PATH — ChromaDB persist directory (default `./chroma_db`)
+- CHROMA_COLLECTION_NAME — collection name (default `markdown_docs`)
+- OLLAMA_BASE_URL — Ollama host (if used)
+- OLLAMA_MODEL — model name for embeddings (if used)
+- API_HOST — host (default `0.0.0.0`)
+- API_PORT — port (default `8000`)
+- REQUESTS_CA_BUNDLE — optional CA bundle when using private CAs
 
-You should see a response like:
+Place env values into `.env` in repo root (see `.env.example`).
 
-```json
-{
-  "status": "success",
-  "message": "Successfully indexed documents from ./markdown_files",
-  "documents_indexed": 5,
-  "chunks_created": 23
-}
-```
+---
 
-## Step 7: Retrieve Chunks
+## Watcher sidecar (behavior & tuning)
 
-Get the indexed chunks:
+- Script: `scripts/watch_and_index.py`
+  - Uses Watchdog's `PollingObserver` (works on NFS)
+  - Debounce window to avoid repeated triggers during bulk file operations
+  - Waits for file size to stabilize (to avoid partial reads)
+  - Posts a JSON body `{}` with header `Content-Type: application/json` to the configured endpoint
+  - Retries with exponential backoff on transient network failures
+  - CLI opts: `--watch-dir`, `--endpoint`, `--debounce`, `--poll-interval`, `--wait-stable`, `--insecure`
+- Startup wrapper: `scripts/wait_and_exec.sh`
+  - Waits for project venv python to appear to avoid race conditions with `uv venv`/`uv sync`
+  - Prefers a python interpreter that already has required packages (requests, watchdog)
+- Volumes recommendation:
+  - Mount only the folders you need (scripts & markdown_docs) rather than mounting the whole repo root to avoid hiding build-time venvs:
+    ```yaml
+    volumes:
+      - ./scripts:/opt/dockerapps/lang_un_rag/scripts:rw
+      - ./markdown_docs:/app/markdown_files:rw
+    ```
 
-```bash
-curl "http://localhost:8000/get_chunks?limit=5"
-```
+---
 
-## Step 8: Check Statistics
+## API overview
 
-View collection statistics:
+- GET / — API info
+- GET /health — health check
+- POST /index — process & index documents from configured directory
+- POST /reindex — clear index and reindex files
+- GET /get_chunks?limit=N — enumerate stored chunks; returns `total_chunks` and `chunks` list
+- GET /stats — collection stats (collection_name, document_count, persist_directory)
+- POST /query — similarity query; payload: `{ "prompt": "...", "k": 5 }`
 
-```bash
-curl http://localhost:8000/stats
-```
+Response shapes and example calls are located in the in-repo examples and `app/main.py`.
 
-## Troubleshooting
+---
 
-### Ollama Connection Issues
+## Troubleshooting (common issues)
 
-If you get connection errors to Ollama:
+- ModuleNotFoundError for `requests` in watcher:
+  - Ensure the watcher is executed with the venv that has dependencies (e.g., `/app/.venv/bin/python3`) or install deps into the image.
+- Venv hidden by bind mount:
+  - If you mount the repo root to the same path used during image build, you may hide build-time artifacts (venv). Create the venv outside the mount point (e.g., `/app/.venv`) or mount narrower paths.
+- OCR is not extracting text:
+  - Install the `tesseract` binary in the image or host and ensure `pytesseract` is available in Python dependencies.
+- TLS errors:
+  - Ensure `ca-certificates` are installed in the image. For private CAs set `REQUESTS_CA_BUNDLE` or install CA cert into system trust store.
 
-1. Verify Ollama is running: `curl http://localhost:11434/api/version`
-2. Check Docker can reach host: `docker run --rm curlimages/curl curl http://host.docker.internal:11434/api/version`
-3. On Linux, you may need to use `http://172.17.0.1:11434` instead of `host.docker.internal`
+---
 
-### No Markdown Files Found
+## Maintenance & operations
 
-If indexing fails with "No markdown files found":
+- Full reindex:
+  - POST `/reindex` triggers clear + rebuild. `clear_collection()` tries to call a Chroma delete API and falls back to removing the persist directory when needed.
+- Persistence:
+  - Persist the `CHROMA_DB_PATH` with a Docker volume or bind mount for durability.
+- Cert renewals:
+  - If an external reverse proxy (e.g., nginx) manages ACME certs, ensure it reloads after renewal so watchers and external clients continue to validate TLS.
 
-1. Check that markdown files exist: `ls markdown_files/`
-2. Ensure files have `.md` extension
-3. Check file permissions
+---
 
-### Port Already in Use
+## Contributing
 
-If port 8000 is already in use:
+- Keep vector_store helper methods stable because API endpoints depend on `get_all_chunks`, `get_collection_stats`, etc.
+- Add tests under `tests/` and run with `pytest`.
+- Open PRs against `main` with a concise commit message.
 
-1. Change the port in `.env`: `API_PORT=8080`
-2. Update docker-compose.yml ports: `"8080:8080"`
+---
 
-## Next Steps
+## License
 
-- Read the full [README.md](README.md) for detailed documentation
-- Check [IMPLEMENTATION.md](IMPLEMENTATION.md) for technical details
-- Run [examples.sh](examples.sh) to see all API endpoints in action
-- Add more markdown files and reindex: `curl -X POST http://localhost:8000/reindex`
-
-## Stopping the System
-
-To stop the system:
-
-```bash
-# Press Ctrl+C in the terminal where it's running
-# Or if running in detached mode:
-docker-compose down
-```
-
-## Development Mode
-
-To run in development mode with auto-reload:
-
-```bash
-# Install UV (if not using Docker)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Create virtual environment
-uv venv
-source .venv/bin/activate
-
-# Install dependencies
-uv pip install -r requirements.txt
-
-# Run with auto-reload
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-## Getting Help
-
-- Check the logs: `docker-compose logs -f`
-- Visit the API docs: `http://localhost:8000/docs` (Swagger UI)
-- Review the health endpoint: `http://localhost:8000/health`
-
-Happy RAG-ing! 🚀
+MIT
