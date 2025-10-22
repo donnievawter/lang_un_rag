@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     
     # Ollama Configuration
     ollama_base_url: str = "http://host.docker.internal:11434"
-    ollama_model: str = "llama2"
+    ollama_model: str = "nomic-embed-text"
     
     # ChromaDB Configuration
     chroma_db_path: str = "./chroma_db"

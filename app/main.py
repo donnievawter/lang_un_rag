@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.document_processor import DocumentProcessor
 from app.vector_store import VectorStore
-
+from app.query_chunks import query_chunks
 
 app = FastAPI(
     title="Markdown RAG System",
@@ -57,6 +57,17 @@ class CollectionStatsResponse(BaseModel):
     document_count: int
     persist_directory: str
 
+class QueryRequest(BaseModel):
+    prompt: str
+    k: Optional[int] = 5
+
+class RetrievedChunk(BaseModel):
+    content: str
+    metadata: dict
+
+class QueryResponse(BaseModel):
+    prompt: str
+    results: List[RetrievedChunk]
 
 @app.get("/")
 async def root():
@@ -204,6 +215,19 @@ async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
 
+@app.post("/query", response_model=QueryResponse)
+async def query_route(request: QueryRequest):
+    try:
+        results = query_chunks(request.prompt, request.k)
+        return QueryResponse(
+            prompt=request.prompt,
+            results=[
+                RetrievedChunk(content=doc.page_content, metadata=doc.metadata)
+                for doc in results
+            ]
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

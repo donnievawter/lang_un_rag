@@ -1,10 +1,14 @@
 """Vector store module for ChromaDB integration."""
 from typing import List, Dict, Any, Optional
+
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-from langchain.schema import Document
-from langchain_community.embeddings import OllamaEmbeddings
-from langchain_community.vectorstores import Chroma
+
+from langchain_core.documents import Document
+from langchain_ollama import OllamaEmbeddings
+
+from langchain_chroma import Chroma
+
 
 from app.config import settings
 
@@ -29,6 +33,10 @@ class VectorStore:
             embedding_function=self.embeddings,
             persist_directory=self.persist_directory,
         )
+
+
+        print(f"Chroma class: {self._vectorstore.__class__}")
+
     
     def index_documents(self, documents: List[Document]) -> Dict[str, Any]:
         """Index documents into the vector store.
@@ -43,8 +51,16 @@ class VectorStore:
             self.initialize()
         
         # Add documents to the vector store
-        ids = self._vectorstore.add_documents(documents)
-        
+        self._vectorstore = Chroma.from_documents(
+            documents=documents,
+            embedding=self.embeddings,
+            collection_name=self.collection_name,
+            persist_directory=self.persist_directory,
+        )
+        ids = [doc.metadata.get("chunk_id", str(i)) for i, doc in enumerate(documents)]
+
+      
+
         return {
             "status": "success",
             "documents_indexed": len(documents),
@@ -142,3 +158,19 @@ class VectorStore:
                 "persist_directory": self.persist_directory,
                 "error": str(e)
             }
+    def similarity_search_by_vector(self, embedding: List[float], k: int = 5) -> List[Document]:
+        """Retrieve top-k most similar chunks to the given embedding.
+
+        Args:
+            embedding: The query embedding vector
+            k: Number of chunks to return
+
+        Returns:
+            List of LangChain Document objects
+        """
+        if self._vectorstore is None:
+            self.initialize()
+      
+        return self._vectorstore.similarity_search_by_vector(embedding, k=k)
+
+vector_store = VectorStore()

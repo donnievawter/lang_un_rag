@@ -3,9 +3,13 @@ import os
 from pathlib import Path
 from typing import List
 
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=0)
+
 from langchain_community.document_loaders import UnstructuredMarkdownLoader
-from langchain.schema import Document
+from langchain_core.documents import Document
+
 
 from app.config import settings
 
