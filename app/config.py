@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -10,6 +10,18 @@ class Settings(BaseSettings):
     chroma_db_path: str = Field("./chroma_db", env="CHROMA_DB_PATH")
     api_host: str = Field("0.0.0.0", env="API_HOST")
     api_port: int = Field(8000, env="API_PORT")
+    allowed_extensions: List[str] = Field(
+        default=[".md", ".markdown", ".pdf", ".docx", ".pptx", ".html", ".htm",
+                 ".txt", ".csv", ".png", ".jpg", ".jpeg", ".tiff", ".tif"],
+        env="ALLOWED_EXTENSIONS"
+    )
+
+    # New: directories to exclude during walking (relative directory names)
+    exclude_dirs: List[str] = Field(
+        default=["chroma_db", ".git"],
+        env="EXCLUDE_DIRS"
+    )
+
 
     # Optional sentence-transformers model name (Hugging Face / sentence-transformers)
     sentence_transformer_model: Optional[str] = Field(None, env="SENTENCE_TRANSFORMER_MODEL")

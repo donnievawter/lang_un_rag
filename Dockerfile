@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Install system dependencies
 # Install uv package manager
-RUN apt-get update && apt-get install -y curl tar \
+RUN apt-get update && apt-get install -y curl tar tesseract-ocr poppler-utils libmagic1  tesseract-ocr-eng   ca-certificates \
   && curl -LsSf https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz -o uv.tar.gz \
   && mkdir uv-bin \
   && tar -xzf uv.tar.gz -C uv-bin \

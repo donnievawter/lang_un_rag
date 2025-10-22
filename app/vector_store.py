@@ -1,6 +1,8 @@
 """Vector store module for ChromaDB integration."""
 from typing import List, Dict, Any, Optional
 import uuid
+import shutil
+import os
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -34,7 +36,7 @@ class SentenceTransformerWrapper:
 
 class VectorStore:
     """Manages the ChromaDB vector store."""
-    
+
     def __init__(self):
         """Initialize the vector store."""
         # safe: read from settings with a fallback to a sensible default
@@ -44,7 +46,7 @@ class VectorStore:
         self.collection_name = settings.chroma_collection_name
         self.persist_directory = settings.chroma_db_path
         self._vectorstore: Optional[Chroma] = None
-    
+
     def initialize(self):
         """Initialize or load the vector store."""
         self._vectorstore = Chroma(
@@ -53,12 +55,12 @@ class VectorStore:
             persist_directory=self.persist_directory,
         )
         print(f"Chroma class: {self._vectorstore.__class__}")
-    
+
     def index_documents(self, documents: List[Document]) -> Dict[str, Any]:
-        """Index documents into the vector store."""
+        """Index documents into the vector store. Replaces/creates the collection from documents."""
         if self._vectorstore is None:
             self.initialize()
-        
+
         # Ensure unique ids
         ids = []
         for i, doc in enumerate(documents):
@@ -70,7 +72,7 @@ class VectorStore:
                 unique_id = str(uuid.uuid4())
             ids.append(unique_id)
 
-        # Pass explicit ids and use Chroma.from_documents
+        # Pass explicit ids and use Chroma.from_documents (this will create/overwrite collection)
         self._vectorstore = Chroma.from_documents(
             documents=documents,
             embedding=self.embeddings,
@@ -95,7 +97,163 @@ class VectorStore:
             self.initialize()
         return self._vectorstore.similarity_search_by_vector(embedding, k=k)
 
-    # keep existing methods intact (get_all_chunks, reindex_documents, clear_collection, get_collection_stats, etc.)
+    # --- Re-added helpers for API compatibility ---
+
+    def _get_collection_obj(self):
+        """Return the underlying Chroma collection object in a few common shapes.
+
+        Returns:
+            chroma_collection_object
+        Raises:
+            RuntimeError if no collection object is accessible.
+        """
+        if self._vectorstore is None:
+            self.initialize()
+
+        # If _vectorstore is a LangChain Chroma wrapper, it often stores the inner chroma collection
+        # at _vectorstore._collection. Otherwise the _vectorstore itself might be the collection.
+        try:
+            # LangChain Chroma wrapper
+            coll = getattr(self._vectorstore, "_collection", None)
+            if coll is not None:
+                return coll
+        except Exception:
+            pass
+
+        # Some wrappers expose client or underlying collection directly
+        try:
+            coll = getattr(self._vectorstore, "client", None)
+            if coll is not None:
+                return coll
+        except Exception:
+            pass
+
+        # Fallback to assuming _vectorstore is already the collection
+        if self._vectorstore is not None:
+            return self._vectorstore
+
+        raise RuntimeError("Unable to access underlying Chroma collection object")
+
+    def get_all_chunks(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Return a list of chunks currently stored in the collection.
+
+        Each item is a dict:
+          {"id": <id>, "content": <document_text>, "metadata": <metadata_dict>}
+
+        limit: optional integer to cap returned items (None means all).
+        """
+        coll = self._get_collection_obj()
+
+        # NOTE: chroma Collection.get returns ids by default and some implementations
+        # reject 'ids' as an include value. Do NOT include 'ids' in include list.
+        # Request documents, metadatas, embeddings (embeddings optional).
+        include_fields = ["documents", "metadatas", "embeddings"]
+
+        # Try to call the Chroma collection get() method in a defensive way
+        try:
+            results = coll.get(limit=limit or None, include=include_fields)
+        except TypeError:
+            # Some wrappers may not accept keyword args; try positional (defensive)
+            try:
+                results = coll.get(limit or None, include_fields)
+            except Exception as e:
+                raise RuntimeError(f"Collection.get failed: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Collection.get failed: {e}")
+
+        # coll.get typically returns 'ids' by default (not necessarily in include), so read it defensively
+        ids = results.get("ids", []) or []
+        docs = results.get("documents", []) or []
+        metadatas = results.get("metadatas", []) or []
+
+        chunks = []
+        for i, _id in enumerate(ids):
+            content = docs[i] if i < len(docs) else ""
+            metadata = metadatas[i] if i < len(metadatas) else {}
+            chunks.append({"id": _id, "content": content, "metadata": metadata})
+
+        return chunks
+
+    def list_chunks(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Alias kept for compatibility with older names."""
+        return self.get_all_chunks(limit=limit)
+
+    def clear_collection(self) -> Dict[str, Any]:
+        """Attempt to remove all items from the collection.
+
+        Returns a status dict.
+        """
+        if self._vectorstore is None:
+            self.initialize()
+
+        coll = self._get_collection_obj()
+
+        # Primary attempt: use collection.delete() API to remove all items
+        try:
+            # Many Chroma collection APIs accept delete() without args to remove all entries,
+            # or delete(where=...) or delete(ids=...). Try a few forms.
+            try:
+                coll.delete()
+            except TypeError:
+                # Try delete with ids=None or empty list
+                try:
+                    coll.delete(ids=[])
+                except Exception:
+                    # Last resort: try to delete by metadata catch-all (not ideal)
+                    coll.delete()
+        except Exception as e:
+            # As a fallback, remove the persist_directory and reinitialize the store.
+            try:
+                if os.path.isdir(self.persist_directory):
+                    shutil.rmtree(self.persist_directory)
+            except Exception as e2:
+                raise RuntimeError(f"Failed to clear collection via API ({e}) and failed to remove persist directory ({e2})")
+            # Recreate an empty store instance on next initialize
+            self._vectorstore = None
+            return {"status": "success", "cleared": True, "method": "persist_dir_removed"}
+
+        return {"status": "success", "cleared": True, "method": "collection.delete_called"}
+
+    def reindex_documents(self, documents: List[Document]) -> Dict[str, Any]:
+        """Clear existing collection and index provided documents."""
+        # Clear existing collection
+        clear_res = self.clear_collection()
+
+        # Re-index (index_documents will create or overwrite collection)
+        index_res = self.index_documents(documents)
+
+        return {
+            "status": "success",
+            "cleared": clear_res,
+            "indexed": index_res
+        }
+
+    def get_collection_stats(self) -> Dict[str, Any]:
+        """Return some basic statistics about the collection."""
+        stats = {
+            "collection_name": self.collection_name,
+            "persist_directory": self.persist_directory,
+            "document_count": 0,
+        }
+        try:
+            chunks = self.get_all_chunks(limit=None)
+            stats["document_count"] = len(chunks)
+        except Exception:
+            # If we can't enumerate, try alternate method by asking the underlying collection for count
+            try:
+                coll = self._get_collection_obj()
+                # Some chroma wrappers have a count() or len-like API
+                if hasattr(coll, "count"):
+                    stats["document_count"] = coll.count()
+                elif hasattr(coll, "get"):
+                    res = coll.get(limit=None, include=["documents", "metadatas"])
+                    stats["document_count"] = len(res.get("ids", []))
+            except Exception:
+                stats["document_count"] = 0
+
+        return stats
+
 
 # singleton used by the app
 vector_store = VectorStore()
