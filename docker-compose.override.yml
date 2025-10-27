@@ -1,5 +1,6 @@
 services:
-  watcher:
+  # Original watcher (for comparison/fallback)
+  watcher-original:
     build:
       context: .
     restart: always
@@ -15,3 +16,25 @@ services:
     volumes:
       - ./:/opt/dockerapps/lang_un_rag:rw
       - ./markdown_docs:/app/markdown_files
+    profiles:
+      - original-watcher
+
+  # New robust watcher (default)
+  watcher:
+    build:
+      context: .
+    restart: always
+    command: >
+      /app/.venv/bin/python3 /opt/dockerapps/lang_un_rag/scripts/robust_nfs_watcher.py
+      --watch-dir /app/markdown_files
+      --endpoint https://rag.hlab.cam/reindex
+      --debounce 60
+      --poll-interval 5
+      --scan-interval 300
+      --db-path /app/watcher_state.db
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./:/opt/dockerapps/lang_un_rag:rw
+      - ./markdown_docs:/app/markdown_files
+      - ./watcher_state.db:/app/watcher_state.db
