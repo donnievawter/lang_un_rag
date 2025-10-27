@@ -14,7 +14,17 @@ Supports:
 """
 import os
 import mimetypes
+import warnings
+import logging
 from typing import List, Dict
+
+# Suppress specific PDF parsing warnings
+warnings.filterwarnings("ignore", message=".*FontBBox.*")
+warnings.filterwarnings("ignore", message=".*cannot be parsed as 4 floats.*")
+
+# Configure logging to reduce PDF parsing noise
+logging.getLogger("pdfplumber").setLevel(logging.ERROR)
+logging.getLogger("pypdf").setLevel(logging.ERROR)
 
 try:
     import magic  # python-magic
@@ -55,24 +65,50 @@ def detect_mime(path: str) -> str:
 
 def extract_from_pdf(path: str) -> List[Dict]:
     texts = []
+    
+    # First try with pdfplumber with suppressed warnings
     try:
-        with pdfplumber.open(path) as pdf:
-            for i, page in enumerate(pdf.pages):
-                text = page.extract_text() or ""
-                text = text.strip()
-                if text:
-                    texts.append({"text": text, "metadata": {"file": os.path.basename(path), "page": i + 1, "file_type": "pdf"}})
-    except Exception:
+        # Suppress stderr temporarily to hide FontBBox warnings
+        import sys
+        import os
+        from contextlib import redirect_stderr
+        
+        with open(os.devnull, 'w') as devnull:
+            with redirect_stderr(devnull):
+                with pdfplumber.open(path) as pdf:
+                    for i, page in enumerate(pdf.pages):
+                        try:
+                            text = page.extract_text() or ""
+                            text = text.strip()
+                            if text:
+                                texts.append({"text": text, "metadata": {"file": os.path.basename(path), "page": i + 1, "file_type": "pdf"}})
+                        except Exception as page_error:
+                            # Skip problematic pages but continue with others
+                            print(f"Warning: Failed to extract text from page {i + 1} of {os.path.basename(path)}: {page_error}")
+                            continue
+    except Exception as pdf_error:
+        print(f"Warning: pdfplumber failed for {os.path.basename(path)}: {pdf_error}")
         # fallback to pypdf
         try:
-            reader = PdfReader(path)
-            for i, page in enumerate(reader.pages):
-                text = page.extract_text() or ""
-                text = text.strip()
-                if text:
-                    texts.append({"text": text, "metadata": {"file": os.path.basename(path), "page": i + 1, "file_type": "pdf"}})
-        except Exception:
-            pass
+            import sys
+            import os
+            from contextlib import redirect_stderr
+            
+            with open(os.devnull, 'w') as devnull:
+                with redirect_stderr(devnull):
+                    reader = PdfReader(path)
+                    for i, page in enumerate(reader.pages):
+                        try:
+                            text = page.extract_text() or ""
+                            text = text.strip()
+                            if text:
+                                texts.append({"text": text, "metadata": {"file": os.path.basename(path), "page": i + 1, "file_type": "pdf"}})
+                        except Exception as page_error:
+                            # Skip problematic pages but continue with others
+                            print(f"Warning: Failed to extract text from page {i + 1} of {os.path.basename(path)} with pypdf: {page_error}")
+                            continue
+        except Exception as pypdf_error:
+            print(f"Warning: pypdf also failed for {os.path.basename(path)}: {pypdf_error}")
 
     # If we got very little text overall, treat as scanned and OCR
     total_chars = sum(len(p["text"]) for p in texts)
@@ -85,12 +121,16 @@ def extract_from_scanned_pdf(path: str) -> List[Dict]:
     try:
         pages = convert_from_path(path, dpi=200)  # requires poppler
         for i, page in enumerate(pages):
-            text = pytesseract.image_to_string(page)
-            text = text.strip()
-            if text:
-                out.append({"text": text, "metadata": {"file": os.path.basename(path), "page": i + 1, "file_type": "scanned_pdf"}})
-    except Exception:
-        pass
+            try:
+                text = pytesseract.image_to_string(page)
+                text = text.strip()
+                if text:
+                    out.append({"text": text, "metadata": {"file": os.path.basename(path), "page": i + 1, "file_type": "scanned_pdf"}})
+            except Exception as ocr_error:
+                print(f"Warning: OCR failed for page {i + 1} of {os.path.basename(path)}: {ocr_error}")
+                continue
+    except Exception as convert_error:
+        print(f"Warning: Failed to convert PDF to images for OCR: {os.path.basename(path)}: {convert_error}")
     return out
 
 def extract_from_docx(path: str) -> List[Dict]:
@@ -180,20 +220,30 @@ def extract_fallback_text(path: str) -> List[Dict]:
 def extract(path: str) -> List[Dict]:
     mime = detect_mime(path) or ""
     lower = path.lower()
+    filename = os.path.basename(path)
+    
     try:
         if lower.endswith(".pdf") or (mime and mime.startswith("application/pdf")):
+            print(f"Processing PDF: {filename}")
             return extract_from_pdf(path)
         if lower.endswith(".docx"):
+            print(f"Processing DOCX: {filename}")
             return extract_from_docx(path)
         if lower.endswith(".pptx"):
+            print(f"Processing PPTX: {filename}")
             return extract_from_pptx(path)
         if lower.endswith(".html") or lower.endswith(".htm") or mime == "text/html":
+            print(f"Processing HTML: {filename}")
             return extract_from_html(path)
         if lower.endswith(".csv"):
+            print(f"Processing CSV: {filename}")
             return extract_from_csv(path)
         if lower.endswith((".png", ".jpg", ".jpeg", ".tiff", ".tif")) or (mime and mime.startswith("image/")):
+            print(f"Processing Image: {filename}")
             return extract_from_image(path)
         # fallback: try plain text
+        print(f"Processing as text: {filename}")
         return extract_fallback_text(path)
-    except Exception:
+    except Exception as e:
+        print(f"Error processing file {filename}: {e}")
         return []

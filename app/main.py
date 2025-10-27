@@ -142,7 +142,7 @@ async def reindex_documents():
         return ReindexResponse(
             status="success",
             message=f"Successfully reindexed documents from {settings.markdown_dir}",
-            documents_indexed=result["documents_indexed"],
+            documents_indexed=result["indexed"]["documents_indexed"],
             chunks_created=len(chunks),
         )
     except ValueError as e:
