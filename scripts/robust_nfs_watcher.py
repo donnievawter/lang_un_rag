@@ -50,6 +50,11 @@ class FileStateDB:
     
     def __init__(self, db_path: str):
         self.db_path = db_path
+        # Ensure the directory exists
+        db_dir = os.path.dirname(db_path)
+        if db_dir and not os.path.exists(db_dir):
+            os.makedirs(db_dir, exist_ok=True)
+            
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.lock = threading.Lock()
         self._init_db()
@@ -517,7 +522,10 @@ def main():
     verify = not args.insecure
     
     # Wait for API health
-    health_url = args.endpoint.replace("/index", "/health")
+    # Construct health URL properly - replace the path component
+    from urllib.parse import urlparse, urlunparse
+    parsed = urlparse(args.endpoint)
+    health_url = urlunparse(parsed._replace(path="/health"))
     wait_for_health(health_url, timeout=60, verify=verify)
     
     # Create and start watcher

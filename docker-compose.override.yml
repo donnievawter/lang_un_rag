@@ -31,10 +31,9 @@ services:
       --debounce 60
       --poll-interval 5
       --scan-interval 300
-      --db-path /app/watcher_state.db
+      --db-path /tmp/watcher_state.db
     environment:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./:/opt/dockerapps/lang_un_rag:rw
       - ./markdown_docs:/app/markdown_files
-      - ./watcher_state.db:/app/watcher_state.db
