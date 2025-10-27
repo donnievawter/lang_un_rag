@@ -191,17 +191,28 @@ class VectorStore:
 
         # Primary attempt: use collection.delete() API to remove all items
         try:
-            # Many Chroma collection APIs accept delete() without args to remove all entries,
-            # or delete(where=...) or delete(ids=...). Try a few forms.
+            # First, try to get all IDs in the collection
             try:
-                coll.delete()
-            except TypeError:
-                # Try delete with ids=None or empty list
+                # Get all IDs to delete them explicitly
+                results = coll.get(include=[])  # Only get IDs, not documents or metadata
+                ids_to_delete = results.get("ids", [])
+                
+                if ids_to_delete:
+                    # Delete by providing specific IDs
+                    coll.delete(ids=ids_to_delete)
+                else:
+                    # Collection is already empty
+                    return {"status": "success", "cleared": True, "method": "collection_already_empty"}
+                    
+            except Exception:
+                # Fallback: try delete with where clause that matches everything
                 try:
-                    coll.delete(ids=[])
+                    # Use a where clause that should match all documents
+                    coll.delete(where={"$or": [{"source": {"$ne": ""}}, {"source": {"$eq": ""}}]})
                 except Exception:
-                    # Last resort: try to delete by metadata catch-all (not ideal)
-                    coll.delete()
+                    # Last resort: try to delete by metadata catch-all
+                    coll.delete(where={})
+                    
         except Exception as e:
             # As a fallback, remove the persist_directory and reinitialize the store.
             try:
