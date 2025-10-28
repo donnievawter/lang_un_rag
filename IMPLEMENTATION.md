@@ -68,7 +68,7 @@ This document explains the main components, design decisions, and operational de
   - Persist the `CHROMA_DB_PATH` to a Docker volume or host bind mount for durability.
   - To migrate or back up, copy the persist directory while Chroma is not actively writing or use Chroma export methods if available.
 - Certificates:
-  - If using a reverse proxy with ACME certs (e.g., `rag.hlab.cam`), ensure the proxy reloads after renewal. Containers should have `ca-certificates` installed to validate Let’s Encrypt certs.
+  - If using a reverse proxy with ACME certs (e.g., `rag.example.com`), ensure the proxy reloads after renewal. Containers should have `ca-certificates` installed to validate Let's Encrypt certs.
 
 ## Extending the system
 

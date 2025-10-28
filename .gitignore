@@ -47,6 +47,10 @@ htmlcov/
 chroma_db/
 *.db
 
+# Document directories (NFS mounted content)
+markdown_docs/
+markdown_files/
+
 # Logs
 *.log
 

@@ -136,7 +136,7 @@ def wait_for_health(endpoint_health: str, timeout: int = 60, verify: bool = True
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--watch-dir", required=True, help="Directory to watch")
-    parser.add_argument("--endpoint", default="http://localhost:8000/index", help="Index endpoint to POST to (use https://rag.hlab.com/index)")
+    parser.add_argument("--endpoint", default="http://localhost:8000/index", help="Index endpoint to POST to (use https://rag.example.com/index)")
     parser.add_argument("--debounce", type=int, default=60, help="Seconds to debounce index calls")
     parser.add_argument("--poll-interval", type=int, default=5, help="Polling interval for the PollingObserver (seconds)")
     parser.add_argument("--wait-stable", type=int, default=2, help="Seconds file size must be stable before triggering")

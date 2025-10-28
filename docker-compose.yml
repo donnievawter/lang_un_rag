@@ -10,7 +10,7 @@ services:
       - ./chroma_db:/app/chroma_db
       - ./.env:/app/.env
     environment:
-      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://crow.lan:11434}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://server.local:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-llama2}
       - CHROMA_DB_PATH=/app/chroma_db
       - MARKDOWN_DIR=/app/markdown_files

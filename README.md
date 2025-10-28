@@ -93,7 +93,13 @@ Notes:
 - Use `docker compose` (newer Compose plugin).
 - Remove `version:` keys from compose files if you see warnings about them being obsolete.
 
-1. Build and start services (app + watcher sidecar):
+1. Copy the example environment file and configure it:
+   ```
+   cp .env.example .env
+   ```
+   Edit `.env` to match your environment (see Configuration section below).
+
+2. Build and start services (app + watcher sidecar):
    ```
    docker compose up -d --build
    ```
@@ -119,7 +125,7 @@ Notes:
    ```
    Or (if using the external proxy):
    ```
-   curl -X POST "https://rag.hlab.cam/index" -H "Content-Type: application/json" -d '{}'
+   curl -X POST "https://rag.example.com/index" -H "Content-Type: application/json" -d '{}'
    ```
 
 ---
@@ -128,13 +134,28 @@ Notes:
 
 Settings are read by `app/config.py` via pydantic. Key environment variables (set in `.env`):
 
-- `MARKDOWN_DIR` or `MARKDOWN_DIR`-equivalent — directory to scan (e.g., `./markdown_docs`)
+### API Configuration
+- `MARKDOWN_DIR` — directory to scan (default: `./markdown_files`)
 - `CHROMA_DB_PATH` — ChromaDB persist directory (default: `./chroma_db`)
 - `CHROMA_COLLECTION_NAME` — collection name (default: `markdown_docs`)
 - `OLLAMA_BASE_URL` — Ollama URL, if using a local Ollama instance
 - `OLLAMA_MODEL` — model used for embeddings, if configured
 - `API_HOST` — host to bind (default: `0.0.0.0`)
 - `API_PORT` — port to bind (default: `8000`)
+
+### Watcher Configuration
+- `WATCHER_DEBOUNCE` — seconds to debounce index calls (default: `60`)
+- `WATCHER_POLL_INTERVAL` — polling interval for filesystem events (default: `5`)
+- `WATCHER_SCAN_INTERVAL` — interval for full directory scans (default: `300`)
+- `WATCHER_WAIT_STABLE` — seconds a file must be unchanged before triggering (default: `2`)
+
+### Local Paths
+- `MARKDOWN_DOCS_PATH` — host path to your document directory (default: `./markdown_docs`)
+
+Note: Watcher endpoints and internal paths are hardcoded for Docker networking (`http://rag-api:8000/index`, `/app/markdown_files`, `/tmp/watcher_state.db`)
+
+### Local Paths
+- `MARKDOWN_DOCS_PATH` — host path to your document directory (default: `./markdown_docs`)
 
 See `.env.example` for a sample configuration.
 
@@ -146,7 +167,7 @@ See `.env.example` for a sample configuration.
   - Uses Watchdog's `PollingObserver` (robust on NFS)
   - CLI options:
     - `--watch-dir` (required) — directory to observe inside the container
-    - `--endpoint` — full URL to POST (e.g., `https://rag.hlab.cam/index`)
+    - `--endpoint` — full URL to POST (e.g., `https://rag.example.com/index`)
     - `--debounce` — seconds to debounce repeated events
     - `--poll-interval` — PollingObserver interval
     - `--wait-stable` — seconds a file must be unchanged before triggering
@@ -165,7 +186,7 @@ See `.env.example` for a sample configuration.
       command: >
         /app/.venv/bin/python3 /opt/dockerapps/lang_un_rag/scripts/watch_and_index.py
         --watch-dir /app/markdown_files
-        --endpoint https://rag.hlab.cam/index
+        --endpoint https://rag.example.com/index
         --debounce 60
         --poll-interval 5
         --wait-stable 2
@@ -245,7 +266,7 @@ If not using `uv`, create a venv and `pip install -e .` or `pip install -r requi
 - Chroma persistence
   - Persist `CHROMA_DB_PATH` with a Docker volume or bind-mount for long-term storage.
 - Certificates
-  - If a reverse proxy (e.g., nginx at `rag.hlab.cam`) provides ACME certs, ensure it reloads after renewal.
+  - If a reverse proxy (e.g., nginx at `rag.example.com`) provides ACME certs, ensure it reloads after renewal.
 
 ---
 

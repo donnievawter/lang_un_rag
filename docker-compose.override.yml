@@ -1,39 +1,22 @@
-services:
-  # Original watcher (for comparison/fallback)
-  watcher-original:
-    build:
-      context: .
-    restart: always
-    command: >
-      /app/.venv/bin/python3 /opt/dockerapps/lang_un_rag/scripts/watch_and_index.py
-      --watch-dir /app/markdown_files
-      --endpoint https://rag.hlab.cam/index
-      --debounce 60
-      --poll-interval 5
-      --wait-stable 2
-    environment:
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - ./:/opt/dockerapps/lang_un_rag:rw
-      - ./markdown_docs:/app/markdown_files
-    profiles:
-      - original-watcher
+# Docker Compose override for local development with watcher sidecar
+# Configure via .env file - copy .env.example to .env and adjust paths/settings
 
-  # New robust watcher (default)
+services:
+  # Robust NFS watcher
   watcher:
     build:
       context: .
     restart: always
     command: >
-      /app/.venv/bin/python3 /opt/dockerapps/lang_un_rag/scripts/robust_nfs_watcher.py
+      /app/.venv/bin/python3 /app/scripts/robust_nfs_watcher.py
       --watch-dir /app/markdown_files
-      --endpoint https://rag.hlab.cam/reindex
-      --debounce 60
-      --poll-interval 5
-      --scan-interval 300
+      --endpoint http://rag-api:8000/reindex
+      --debounce ${WATCHER_DEBOUNCE:-60}
+      --poll-interval ${WATCHER_POLL_INTERVAL:-5}
+      --scan-interval ${WATCHER_SCAN_INTERVAL:-300}
       --db-path /tmp/watcher_state.db
     environment:
       - PYTHONUNBUFFERED=1
     volumes:
-      - ./:/opt/dockerapps/lang_un_rag:rw
-      - ./markdown_docs:/app/markdown_files
+      - ./scripts:/app/scripts:ro
+      - ${MARKDOWN_DOCS_PATH:-./markdown_docs}:/app/markdown_files:ro

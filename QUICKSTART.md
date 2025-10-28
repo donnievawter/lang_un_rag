@@ -74,7 +74,7 @@ Prereqs:
      ```
    - If using the reverse proxy / external endpoint:
      ```
-     curl -X POST "https://rag.hlab.cam/index" -H "Content-Type: application/json" -d '{}'
+     curl -X POST "https://rag.example.com/index" -H "Content-Type: application/json" -d '{}'
      ```
 
 5. Inspect chunks:
