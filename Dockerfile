@@ -5,33 +5,33 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies
-# Install uv package manager
-RUN apt-get update && apt-get install -y curl tar tesseract-ocr poppler-utils libmagic1  tesseract-ocr-eng   ca-certificates \
-  && curl -LsSf https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-gnu.tar.gz -o uv.tar.gz \
-  && mkdir uv-bin \
-  && tar -xzf uv.tar.gz -C uv-bin \
-  && mv uv-bin/uv-x86_64-unknown-linux-gnu/uv /usr/local/bin/uv \
-  && chmod +x /usr/local/bin/uv \
-  && uv --version \
+RUN apt-get update && apt-get install -y \
+  tesseract-ocr \
+  poppler-utils \
+  libmagic1 \
+  tesseract-ocr-eng \
+  ca-certificates \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install uv package manager
-#RUN curl -LsSf https://astral.sh/uv/install.sh | bash -s -- --yes --root /usr/local
-ENV PATH="/usr/local/bin:$PATH"
 
 # Copy project files
 COPY pyproject.toml .
-COPY uv.lock .
+COPY requirements.txt .
 COPY README.md .
-RUN echo $PATH
-RUN ls uv-bin
-RUN ls /usr/local/bin
-RUN ls -l /usr/local/bin/uv
-ENV UV_VENV_DIR=/app/.venv
-RUN which uv && uv --version
-RUN uv venv
-#COPY requirements.txt ./
-RUN uv sync
+
+# Create virtual environment
+RUN python -m venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+
+# Install PyTorch CPU-only first to avoid GPU dependencies
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+# Install sentence-transformers with CPU-only PyTorch
+RUN pip install --no-cache-dir sentence-transformers
+
+# Install remaining dependencies with pip
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
 COPY app ./app
 ARG SENTENCE_TRANSFORMER_MODEL=all-mpnet-base-v2
 ENV SENTENCE_TRANSFORMER_MODEL=${SENTENCE_TRANSFORMER_MODEL}
@@ -40,13 +40,11 @@ ENV SENTENCE_TRANSFORMER_MODEL=${SENTENCE_TRANSFORMER_MODEL}
 # Create necessary directories
 RUN mkdir -p markdown_files chroma_db
 
-# Install dependencies using uv (with fallback to pip)
-#RUN uv pip install --system --no-cache -r requirements.txt || \
-#    pip install --no-cache-dir -r requirements.txt
+# Dependencies are already installed above
 
 
 # Expose the FastAPI port
 EXPOSE 8000
 
 # Run the application
-CMD ["uv","run" ,"uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
