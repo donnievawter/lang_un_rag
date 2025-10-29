@@ -20,6 +20,7 @@ This README replaces the old documentation and reflects the current repository s
   - `GET /get_chunks` — enumerate stored chunks (supports `?limit=N`)
   - `GET /stats` — collection statistics
   - `POST /query` — run a similarity query (RAG)
+  - `POST /document` — retrieve raw content of a specific document by file path
 - Vector store:
   - ChromaDB-backed store (wrapper in `app/vector_store.py`)
   - Embeddings via local sentence-transformers wrapper (or other configured provider)
@@ -47,6 +48,7 @@ The document ingestion pipeline has been extended beyond Markdown and now accept
 - Plain text / markup
   - .md, .markdown, .txt
   - .html, .htm
+  - .csv
 - PDF
   - .pdf (processed via pdf libraries such as pypdf / pdfplumber)
 - Office documents
@@ -54,7 +56,7 @@ The document ingestion pipeline has been extended beyond Markdown and now accept
   - .pptx (PowerPoint)
   - (Note: legacy .doc/.ppt binary formats may require additional tooling or conversion)
 - Images (text extraction requires OCR)
-  - .png, .jpg, .jpeg, .tif, .tiff, .bmp, .gif
+  - .png, .jpg, .jpeg, .tif, .tiff
   - (OCR via pytesseract + pillow/pdf2image where appropriate)
 - Other
   - Any file types for which Unstructured or installed loaders provide support; the pipeline will attempt to extract text where possible.
@@ -121,11 +123,24 @@ Notes:
 
 4. Trigger indexing manually:
    ```
-   curl -X POST "http://localhost:8000/index"
+   curl -X POST "http://localhost:2700/index"
    ```
    Or (if using the external proxy):
    ```
    curl -X POST "https://rag.example.com/index" -H "Content-Type: application/json" -d '{}'
+   ```
+
+5. Test other endpoints:
+   ```bash
+   # Query for similar documents
+   curl -X POST "http://localhost:2700/query" \
+     -H "Content-Type: application/json" \
+     -d '{"prompt": "search terms", "k": 3}'
+   
+   # Get raw document content
+   curl -X POST "http://localhost:2700/document" \
+     -H "Content-Type: application/json" \
+     -d '{"file_path": "example.md"}'
    ```
 
 ---
@@ -213,6 +228,9 @@ See `.env.example` for a sample configuration.
   - Returns `collection_name`, `document_count`, `persist_directory`
 - POST /query
   - Send `{ "prompt": "...", "k": 5 }` to retrieve similar chunks
+- POST /document
+  - Send `{ "file_path": "relative/path/to/file.md" }` to get raw document content
+  - Returns file content, content type, and size metadata
 
 ---
 

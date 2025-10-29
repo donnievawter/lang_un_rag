@@ -1,4 +1,6 @@
 """FastAPI application for the RAG system."""
+import os
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -69,6 +71,19 @@ class QueryResponse(BaseModel):
     prompt: str
     results: List[RetrievedChunk]
 
+
+class DocumentRequest(BaseModel):
+    """Request model for document retrieval."""
+    file_path: str = Field(..., description="Relative path to the document within the markdown_docs directory")
+
+
+class DocumentResponse(BaseModel):
+    """Response model for document content."""
+    file_path: str
+    content: str
+    content_type: str
+    size_bytes: int
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -80,6 +95,8 @@ async def root():
             "/reindex": "Clear and reindex markdown files",
             "/get_chunks": "Retrieve indexed chunks",
             "/stats": "Get collection statistics",
+            "/query": "Perform similarity search on indexed documents",
+            "/document": "Retrieve raw content of a specific document",
         }
     }
 
@@ -214,6 +231,82 @@ async def get_stats():
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.post("/document", response_model=DocumentResponse)
+async def get_document(request: DocumentRequest):
+    """Retrieve the raw content of a document from the markdown_docs directory.
+    
+    Args:
+        request: DocumentRequest with file_path relative to markdown_docs
+        
+    Returns:
+        DocumentResponse with file content and metadata
+    """
+    try:
+        # Ensure the file path is relative and safe
+        file_path = request.file_path.strip().lstrip('/')
+        
+        # Construct the full path within the configured markdown directory
+        markdown_dir = Path(settings.markdown_dir).resolve()
+        full_path = markdown_dir / file_path
+        
+        # Security check: ensure the resolved path is within the markdown directory
+        try:
+            full_path = full_path.resolve()
+            full_path.relative_to(markdown_dir)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid file path: path must be within the configured document directory"
+            )
+        
+        # Check if file exists
+        if not full_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"Document not found: {file_path}"
+            )
+        
+        # Check if it's a file (not a directory)
+        if not full_path.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Path is not a file: {file_path}"
+            )
+        
+        # Read the file content
+        try:
+            # Try to read as text first (UTF-8)
+            with open(full_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            content_type = "text/plain"
+        except UnicodeDecodeError:
+            # If UTF-8 fails, read as binary and return base64
+            with open(full_path, 'rb') as f:
+                import base64
+                content = base64.b64encode(f.read()).decode('ascii')
+            content_type = "application/octet-stream"
+        
+        # Get file size
+        size_bytes = full_path.stat().st_size
+        
+        return DocumentResponse(
+            file_path=file_path,
+            content=content,
+            content_type=content_type,
+            size_bytes=size_bytes
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error reading document: {str(e)}"
+        )
+
 
 @app.post("/query", response_model=QueryResponse)
 async def query_route(request: QueryRequest):
