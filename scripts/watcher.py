@@ -56,6 +56,7 @@ class IntelligentHandler(FileSystemEventHandler):
                  debounce_seconds: int = 5,
                  wait_stable: int = 2,
                  bulk_threshold: int = 10,
+                 request_timeout: int = 600,
                  verify: bool = True):
         super().__init__()
         self.base_url = base_url.rstrip('/')
@@ -64,6 +65,7 @@ class IntelligentHandler(FileSystemEventHandler):
         self.debounce_seconds = debounce_seconds
         self.wait_stable = wait_stable
         self.bulk_threshold = bulk_threshold
+        self.request_timeout = request_timeout
         self.verify = verify
         
         # Event tracking
@@ -132,7 +134,7 @@ class IntelligentHandler(FileSystemEventHandler):
                     url, 
                     json=payload,
                     headers={"Content-Type": "application/json"},
-                    timeout=120,
+                    timeout=self.request_timeout,
                     verify=self.verify
                 )
                 
@@ -334,6 +336,8 @@ def main():
                        help="Seconds file must be stable before processing")
     parser.add_argument("--bulk-threshold", type=int, default=10,
                        help="Number of files that triggers full reindex instead of incremental")
+    parser.add_argument("--timeout", type=int, default=600,
+                       help="HTTP request timeout in seconds for large file processing (default: 600)")
     parser.add_argument("--insecure", action="store_true", 
                        help="Disable TLS verification")
     
@@ -356,6 +360,7 @@ def main():
     logger.info(f"  Allowed extensions: {sorted(allowed_extensions)}")
     logger.info(f"  Debounce: {args.debounce}s")
     logger.info(f"  Bulk threshold: {args.bulk_threshold} files")
+    logger.info(f"  Request timeout: {args.timeout}s")
     
     # Wait for API to be ready
     health_url = f"{base_url}/health"
@@ -371,7 +376,8 @@ def main():
         debounce_seconds=args.debounce,
         wait_stable=args.wait_stable,
         bulk_threshold=args.bulk_threshold,
-        verify=verify
+        verify=verify,
+        request_timeout=args.timeout
     )
     
     observer.schedule(handler, str(watch_dir), recursive=True)

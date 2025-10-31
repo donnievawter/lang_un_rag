@@ -1,0 +1,22 @@
+# Docker Compose override for local development with watcher sidecar
+# Configure via .env file - copy .env.example to .env and adjust paths/settings
+
+services:
+  # Robust NFS watcher
+  watcher:
+    build:
+      context: .
+    restart: always
+    command: >
+      /app/.venv/bin/python3 /app/scripts/robust_nfs_watcher.py
+      --watch-dir /app/markdown_files
+      --endpoint http://rag-api:8000/reindex
+      --debounce ${WATCHER_DEBOUNCE:-60}
+      --poll-interval ${WATCHER_POLL_INTERVAL:-5}
+      --scan-interval ${WATCHER_SCAN_INTERVAL:-300}
+      --db-path /tmp/watcher_state.db
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ${MARKDOWN_DOCS_PATH:-./markdown_docs}:/app/markdown_files:ro
