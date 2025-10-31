@@ -95,7 +95,7 @@ class DocumentProcessor:
             try:
                 suffix = file_path.suffix.lower()
                 rel_source = str(file_path.relative_to(docs_dir))
-
+                print(f"Loading document: {rel_source}")
                 # Markdown: use UnstructuredMarkdownLoader to preserve structure
                 if suffix in {".md", ".markdown"}:
                     loader = UnstructuredMarkdownLoader(str(file_path))
@@ -152,6 +152,77 @@ class DocumentProcessor:
             chunk.metadata["chunk_id"] = f"{source}::{i}"
 
         return chunks
+
+    def process_file(self, file_path: str) -> List[Document]:
+        """Load and chunk a single file.
+        
+        Args:
+            file_path: Absolute path to the file to process
+            
+        Returns:
+            List of chunked Document objects
+        """
+        file_path = Path(file_path)
+        
+        # Validate file
+        if not file_path.exists():
+            raise ValueError(f"File {file_path} does not exist")
+        if not file_path.is_file():
+            raise ValueError(f"{file_path} is not a file")
+        
+        # Check allowed extensions
+        allowed_exts = {ext.lower() for ext in getattr(settings, "allowed_extensions", [
+            ".md", ".markdown", ".pdf", ".docx", ".pptx", ".html", ".htm", ".txt", ".csv", ".png", ".jpg", ".jpeg", ".tiff", ".tif"
+        ])}
+        
+        if file_path.suffix.lower() not in allowed_exts:
+            return []  # Skip unsupported files
+        
+        # Load the single file
+        documents = []
+        rel_source = str(file_path)  # Use absolute path as source for consistency
+        
+        try:
+            # Try loading with extractors first
+            try:
+                from app.extractors import extract as generic_extract
+                text = generic_extract(str(file_path))
+                if text and text.strip():
+                    documents.append(Document(page_content=text, metadata={"source": rel_source, "filename": file_path.name}))
+                else:
+                    # If extractor returns empty, try fallback
+                    raise ValueError("No content from extractor")
+            except Exception:
+                # Fallback: try markdown loader for .md files
+                if file_path.suffix.lower() in [".md", ".markdown"]:
+                    try:
+                        loader = UnstructuredMarkdownLoader(str(file_path))
+                        docs = loader.load()
+                        for doc in docs:
+                            doc.metadata.update({"source": rel_source, "filename": file_path.name})
+                        documents.extend(docs)
+                    except Exception:
+                        pass
+                
+                # Final fallback: read as plain text
+                if not documents:
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            text = f.read()
+                        if text.strip():
+                            documents.append(Document(page_content=text, metadata={"source": rel_source, "filename": file_path.name}))
+                    except Exception:
+                        raise ValueError(f"Could not read file: {file_path}")
+                        
+        except Exception as e:
+            raise ValueError(f"Error processing file {file_path}: {e}")
+        
+        # Chunk the documents
+        if documents:
+            chunks = self.chunk_documents(documents)
+            return chunks
+        
+        return []
 
     def process_directory(self) -> List[Document]:
         """Load and chunk all supported files from the configured directory."""

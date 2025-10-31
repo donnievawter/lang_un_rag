@@ -1,22 +1,26 @@
-# Docker Compose override for local development with watcher sidecar
-# Configure via .env file - copy .env.example to .env and adjust paths/settings
+# Docker Compose override for intelligent incremental watcher
+# This uses the new intelligent_watcher.py for incremental indexing
+# Copy this to docker-compose.override.yml to enable intelligent watching
 
 services:
-  # Robust NFS watcher
+  # Intelligent incremental watcher
   watcher:
     build:
       context: .
     restart: always
     command: >
-      /app/.venv/bin/python3 /app/scripts/robust_nfs_watcher.py
+      /app/.venv/bin/python3 /app/scripts/watcher.py
       --watch-dir /app/markdown_files
-      --endpoint http://rag-api:8000/reindex
-      --debounce ${WATCHER_DEBOUNCE:-60}
+      --base-url http://rag-api:8000
+      --allowed-extensions ${ALLOWED_EXTENSIONS:-md,markdown,txt,pdf,docx,pptx,html,htm,csv,png,jpg,jpeg,tiff,tif}
+      --debounce ${WATCHER_DEBOUNCE:-5}
       --poll-interval ${WATCHER_POLL_INTERVAL:-5}
-      --scan-interval ${WATCHER_SCAN_INTERVAL:-300}
-      --db-path /tmp/watcher_state.db
+      --wait-stable ${WATCHER_WAIT_STABLE:-2}
+      --bulk-threshold ${WATCHER_BULK_THRESHOLD:-10}
     environment:
       - PYTHONUNBUFFERED=1
     volumes:
       - ./scripts:/app/scripts:ro
       - ${MARKDOWN_DOCS_PATH:-./markdown_docs}:/app/markdown_files:ro
+    depends_on:
+      - rag-api

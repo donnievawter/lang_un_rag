@@ -17,6 +17,8 @@ This README replaces the old documentation and reflects the current repository s
   - `GET /health` — basic health check
   - `POST /index` — process and index supported files from the configured directory
   - `POST /reindex` — clear and reindex all files
+  - `POST /index_file` — **NEW**: incrementally index or update a single file
+  - `POST /delete_file` — **NEW**: remove a specific file's chunks from the index
   - `GET /get_chunks` — enumerate stored chunks (supports `?limit=N`)
   - `GET /stats` — collection statistics
   - `POST /query` — run a similarity query (RAG)
@@ -29,10 +31,11 @@ This README replaces the old documentation and reflects the current repository s
   - Uses Unstructured and LangChain splitting to extract and chunk document text
   - Per-chunk metadata (source, chunk_id, other file metadata)
   - Supports many file types (see "Supported file types" below)
-- Watcher sidecar:
-  - `scripts/watch_and_index.py` — PollingObserver-based watcher (robust on NFS)
+- Watcher sidecar (multiple options):
+  - `scripts/intelligent_watcher.py` — **NEW**: Smart incremental watcher that performs targeted operations (add/update/delete) instead of full reindex
+  - `scripts/watch_and_index.py` — Basic watcher for full reindex on any change
+  - `scripts/robust_nfs_watcher.py` — Enhanced NFS-safe watcher with checksum-based change detection
   - Debounce + "wait for file stable" logic to avoid partial reads during large copies
-  - Posts JSON `{}` to the configured index endpoint (supports HTTPS), retries with backoff
   - `scripts/wait_and_exec.sh` helper to avoid venv/startup race conditions
 - Dockerized development:
   - Dockerfile + `docker compose` support
@@ -102,7 +105,12 @@ Notes:
    Edit `.env` to match your environment (see Configuration section below).
 
 2. Build and start services (app + watcher sidecar):
-   ```
+   ```bash
+   # Option 1: Use intelligent incremental watcher (recommended)
+   cp docker-compose.override.intelligent.yml docker-compose.override.yml
+   docker compose up -d --build
+   
+   # Option 2: Use default full-reindex watcher
    docker compose up -d --build
    ```
 
@@ -231,6 +239,43 @@ See `.env.example` for a sample configuration.
 - POST /document
   - Send `{ "file_path": "relative/path/to/file.md" }` to get raw document content
   - Returns file content, content type, and size metadata
+- POST /index_file
+  - Send `{ "file_path": "relative/path/to/file.md" }` to incrementally index a single file
+  - Updates existing chunks for the file or adds new ones
+- POST /delete_file
+  - Send `{ "file_path": "relative/path/to/file.md" }` to remove file's chunks from index
+
+---
+
+## Incremental Indexing (NEW)
+
+The system now supports efficient incremental indexing instead of always doing full reindexes:
+
+**Smart Watcher**: Use `scripts/intelligent_watcher.py` for automatic incremental operations:
+- **File created/modified** → `POST /index_file` (updates only that file's chunks)
+- **File deleted** → `POST /delete_file` (removes only that file's chunks)
+- **Bulk operations** → Falls back to `POST /reindex` when many files change at once
+
+**Manual Operations**:
+```bash
+# Add or update a single file
+curl -X POST "http://localhost:2700/index_file" \
+  -H "Content-Type: application/json" \
+  -d '{"file_path": "docs/new-document.md"}'
+
+# Remove a file from the index
+curl -X POST "http://localhost:2700/delete_file" \
+  -H "Content-Type: application/json" \
+  -d '{"file_path": "docs/old-document.md"}'
+```
+
+**Benefits**:
+- **Much faster**: Only processes changed files instead of entire directory
+- **Lower resource usage**: Reduces CPU, memory, and disk I/O
+- **Better concurrency**: Queries can continue while incremental updates happen
+- **Safer**: Less disruption to active search sessions
+
+**When to use full reindex**: Schema changes, embedding model changes, or major bulk operations (>10 files).
 
 ---
 

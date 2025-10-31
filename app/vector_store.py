@@ -3,6 +3,7 @@ from typing import List, Dict, Any, Optional
 import uuid
 import shutil
 import os
+import logging
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
@@ -15,6 +16,8 @@ from sentence_transformers import SentenceTransformer
 from langchain_chroma import Chroma
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class SentenceTransformerWrapper:
@@ -264,6 +267,112 @@ class VectorStore:
                 stats["document_count"] = 0
 
         return stats
+
+    def add_documents_incremental(self, documents: List[Document]) -> Dict[str, Any]:
+        """Add new documents to the existing collection without clearing it first.
+        
+        Args:
+            documents: List of Document objects to add
+            
+        Returns:
+            Dict with status and counts
+        """
+        if self._vectorstore is None:
+            self.initialize()
+        
+        if not documents:
+            return {"status": "success", "documents_added": 0, "ids": []}
+        
+        # Generate unique IDs for new documents
+        ids = []
+        for i, doc in enumerate(documents):
+            source = doc.metadata.get("source")
+            chunk_id = doc.metadata.get("chunk_id")
+            if source is not None and chunk_id is not None:
+                unique_id = f"{source}::{chunk_id}"
+            else:
+                unique_id = str(uuid.uuid4())
+            ids.append(unique_id)
+        
+        # Add documents to existing collection
+        texts = [doc.page_content for doc in documents]
+        metadatas = [doc.metadata for doc in documents]
+        
+        self._vectorstore.add_texts(
+            texts=texts,
+            metadatas=metadatas,
+            ids=ids
+        )
+        
+        return {
+            "status": "success", 
+            "documents_added": len(documents),
+            "ids": ids
+        }
+    
+    def delete_documents_by_source(self, source_file: str) -> Dict[str, Any]:
+        """Delete all documents/chunks that came from a specific source file.
+        
+        Args:
+            source_file: The source file path to delete documents for
+            
+        Returns:
+            Dict with status and deletion count
+        """
+        if self._vectorstore is None:
+            self.initialize()
+        
+        coll = self._get_collection_obj()
+        deleted_count = 0
+        
+        try:
+            # Find all documents with this source
+            results = coll.get(
+                where={"source": source_file},
+                include=["documents", "metadatas"]
+            )
+            
+            ids_to_delete = results.get("ids", [])
+            
+            if ids_to_delete:
+                # Delete the documents
+                coll.delete(ids=ids_to_delete)
+                deleted_count = len(ids_to_delete)
+                logger.info(f"Deleted {deleted_count} chunks from source: {source_file}")
+            
+        except Exception as e:
+            logger.error(f"Error deleting documents for source {source_file}: {e}")
+            return {"status": "error", "message": str(e), "deleted_count": 0}
+        
+        return {
+            "status": "success",
+            "deleted_count": deleted_count,
+            "source_file": source_file
+        }
+    
+    def update_documents_by_source(self, source_file: str, new_documents: List[Document]) -> Dict[str, Any]:
+        """Update documents for a specific source file (delete old, add new).
+        
+        Args:
+            source_file: The source file path to update
+            new_documents: New documents to replace the old ones
+            
+        Returns:
+            Dict with status and operation counts
+        """
+        # Delete existing documents for this source
+        delete_result = self.delete_documents_by_source(source_file)
+        
+        # Add new documents
+        add_result = self.add_documents_incremental(new_documents)
+        
+        return {
+            "status": "success",
+            "source_file": source_file,
+            "deleted_count": delete_result.get("deleted_count", 0),
+            "added_count": add_result.get("documents_added", 0),
+            "new_ids": add_result.get("ids", [])
+        }
 
 
 # singleton used by the app

@@ -84,6 +84,20 @@ class DocumentResponse(BaseModel):
     content_type: str
     size_bytes: int
 
+
+class IncrementalRequest(BaseModel):
+    """Request model for incremental operations."""
+    file_path: str = Field(..., description="Relative path to the file that was added/modified/deleted")
+
+
+class IncrementalResponse(BaseModel):
+    """Response model for incremental operations."""
+    status: str
+    operation: str
+    file_path: str
+    chunks_affected: int
+    message: str
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -93,6 +107,8 @@ async def root():
         "endpoints": {
             "/index": "Index markdown files into ChromaDB",
             "/reindex": "Clear and reindex markdown files",
+            "/index_file": "Index or update a single file incrementally",
+            "/delete_file": "Remove a file's chunks from the index",
             "/get_chunks": "Retrieve indexed chunks",
             "/stats": "Get collection statistics",
             "/query": "Perform similarity search on indexed documents",
@@ -305,6 +321,135 @@ async def get_document(request: DocumentRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error reading document: {str(e)}"
+        )
+
+
+@app.post("/index_file", response_model=IncrementalResponse)
+async def index_single_file(request: IncrementalRequest):
+    """Index a single file (add new or update existing).
+    
+    Args:
+        request: IncrementalRequest with file_path
+        
+    Returns:
+        IncrementalResponse with operation details
+    """
+    try:
+        file_path = request.file_path.strip().lstrip('/')
+        
+        # Construct full path
+        markdown_dir = Path(settings.markdown_dir).resolve()
+        full_path = markdown_dir / file_path
+        
+        # Security check
+        try:
+            full_path = full_path.resolve()
+            full_path.relative_to(markdown_dir)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file path: path must be within the configured document directory"
+            )
+        
+        # Check if file exists and is allowed
+        if not full_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail=f"File not found: {file_path}"
+            )
+        
+        if not full_path.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Path is not a file: {file_path}"
+            )
+        
+        # Check if file extension is allowed
+        if full_path.suffix.lower() not in settings.allowed_extensions:
+            return IncrementalResponse(
+                status="skipped",
+                operation="index_file",
+                file_path=file_path,
+                chunks_affected=0,
+                message=f"File extension {full_path.suffix} not in allowed extensions"
+            )
+        
+        # Process the single file
+        chunks = document_processor.process_file(str(full_path))
+        
+        if not chunks:
+            return IncrementalResponse(
+                status="success",
+                operation="index_file",
+                file_path=file_path,
+                chunks_affected=0,
+                message="No content extracted from file"
+            )
+        
+        # Update documents for this source (delete old, add new)
+        result = vector_store.update_documents_by_source(str(full_path), chunks)
+        
+        return IncrementalResponse(
+            status="success",
+            operation="index_file",
+            file_path=file_path,
+            chunks_affected=result.get("added_count", 0),
+            message=f"Indexed {result.get('added_count', 0)} chunks (deleted {result.get('deleted_count', 0)} old chunks)"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error indexing file: {str(e)}"
+        )
+
+
+@app.post("/delete_file", response_model=IncrementalResponse)
+async def delete_file_from_index(request: IncrementalRequest):
+    """Remove a file's chunks from the index.
+    
+    Args:
+        request: IncrementalRequest with file_path
+        
+    Returns:
+        IncrementalResponse with deletion details
+    """
+    try:
+        file_path = request.file_path.strip().lstrip('/')
+        
+        # Construct full path for validation
+        markdown_dir = Path(settings.markdown_dir).resolve()
+        full_path = markdown_dir / file_path
+        
+        # Security check
+        try:
+            full_path = full_path.resolve()
+            full_path.relative_to(markdown_dir)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid file path: path must be within the configured document directory"
+            )
+        
+        # Delete documents by source (use the full resolved path as key)
+        result = vector_store.delete_documents_by_source(str(full_path))
+        
+        return IncrementalResponse(
+            status="success",
+            operation="delete_file",
+            file_path=file_path,
+            chunks_affected=result.get("deleted_count", 0),
+            message=f"Deleted {result.get('deleted_count', 0)} chunks from index"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error deleting file from index: {str(e)}"
         )
 
 
