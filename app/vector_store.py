@@ -182,6 +182,32 @@ class VectorStore:
         """Alias kept for compatibility with older names."""
         return self.get_all_chunks(limit=limit)
 
+    def get_chunks_for_document(self, source_name: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Return chunks for a specific document source.
+
+        Args:
+            source_name: The source document name (from metadata['source'])
+            limit: Optional limit on number of chunks to return (None means all)
+
+        Returns:
+            List of chunk dictionaries matching the source
+        """
+        # Get all chunks first
+        all_chunks = self.get_all_chunks(limit=None)
+        
+        # Filter by source
+        matching_chunks = []
+        for chunk in all_chunks:
+            metadata = chunk.get("metadata", {})
+            chunk_source = metadata.get("source", "")
+            if chunk_source == source_name:
+                matching_chunks.append(chunk)
+                if limit is not None and len(matching_chunks) >= limit:
+                    break
+        
+        return matching_chunks
+
     def clear_collection(self) -> Dict[str, Any]:
         """Attempt to remove all items from the collection.
 
@@ -277,10 +303,14 @@ class VectorStore:
         Returns:
             Dict with status and counts
         """
+        logger.info(f"🎯 add_documents_incremental called with {len(documents)} documents")
+        print(f"🎯 add_documents_incremental called with {len(documents)} documents")
+        
         if self._vectorstore is None:
             self.initialize()
         
         if not documents:
+            logger.info("No documents to add, returning early")
             return {"status": "success", "documents_added": 0, "ids": []}
         
         # Generate unique IDs for new documents
@@ -294,19 +324,42 @@ class VectorStore:
                 unique_id = str(uuid.uuid4())
             ids.append(unique_id)
         
-        # Add documents to existing collection
-        texts = [doc.page_content for doc in documents]
-        metadatas = [doc.metadata for doc in documents]
+        # Add documents in batches to avoid ChromaDB batch size limits
+        # ChromaDB has a max batch size limit (typically ~5000), so we batch to be safe
+        BATCH_SIZE = 1000  # Conservative batch size to avoid hitting limits
+        total_batches = (len(documents) + BATCH_SIZE - 1) // BATCH_SIZE  # Ceiling division
         
-        self._vectorstore.add_texts(
-            texts=texts,
-            metadatas=metadatas,
-            ids=ids
-        )
+        logger.info(f"🚀 Starting batch processing: {len(documents)} documents in {total_batches} batches of {BATCH_SIZE}")
+        print(f"🚀 Starting batch processing: {len(documents)} documents in {total_batches} batches of {BATCH_SIZE}")
+        
+        total_added = 0
+        
+        for i in range(0, len(documents), BATCH_SIZE):
+            batch_docs = documents[i:i + BATCH_SIZE]
+            batch_texts = [doc.page_content for doc in batch_docs]
+            batch_metadatas = [doc.metadata for doc in batch_docs]
+            batch_ids = ids[i:i + BATCH_SIZE]
+            
+            batch_num = i//BATCH_SIZE + 1
+            logger.info(f"📦 Processing batch {batch_num}/{total_batches}: {len(batch_docs)} documents")
+            print(f"📦 Processing batch {batch_num}/{total_batches}: {len(batch_docs)} documents")
+            
+            self._vectorstore.add_texts(
+                texts=batch_texts,
+                metadatas=batch_metadatas,
+                ids=batch_ids
+            )
+            
+            total_added += len(batch_docs)
+            logger.info(f"✅ Batch {batch_num}/{total_batches} completed")
+            print(f"✅ Batch {batch_num}/{total_batches} completed")
+        
+        logger.info(f"🎉 All batches completed! Successfully added {total_added} documents")
+        print(f"🎉 All batches completed! Successfully added {total_added} documents")
         
         return {
             "status": "success", 
-            "documents_added": len(documents),
+            "documents_added": total_added,
             "ids": ids
         }
     

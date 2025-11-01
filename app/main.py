@@ -85,6 +85,12 @@ class DocumentResponse(BaseModel):
     size_bytes: int
 
 
+class GetChunksForDocumentRequest(BaseModel):
+    """Request model for retrieving chunks for a specific document."""
+    source: str = Field(..., description="Source document name to retrieve chunks for")
+    limit: Optional[int] = Field(None, description="Maximum number of chunks to return (default: all)")
+
+
 class IncrementalRequest(BaseModel):
     """Request model for incremental operations."""
     file_path: str = Field(..., description="Relative path to the file that was added/modified/deleted")
@@ -110,6 +116,7 @@ async def root():
             "/index_file": "Index or update a single file incrementally",
             "/delete_file": "Remove a file's chunks from the index",
             "/get_chunks": "Retrieve indexed chunks",
+            "/get_chunks_for_document": "Retrieve chunks for a specific document source",
             "/stats": "Get collection statistics",
             "/query": "Perform similarity search on indexed documents",
             "/document": "Retrieve raw content of a specific document",
@@ -219,6 +226,39 @@ async def get_chunks(
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving chunks: {str(e)}"
+        )
+
+
+@app.post("/get_chunks_for_document", response_model=GetChunksResponse)
+async def get_chunks_for_document(request: GetChunksForDocumentRequest):
+    """Retrieve chunks for a specific document source.
+    
+    Args:
+        request: GetChunksForDocumentRequest with source and optional limit
+    
+    Returns:
+        GetChunksResponse with matching chunks and metadata
+    """
+    try:
+        chunks = vector_store.get_chunks_for_document(request.source, limit=request.limit)
+        
+        chunk_data = [
+            ChunkData(
+                id=chunk["id"],
+                content=chunk["content"],
+                metadata=chunk["metadata"]
+            )
+            for chunk in chunks
+        ]
+        
+        return GetChunksResponse(
+            total_chunks=len(chunk_data),
+            chunks=chunk_data,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving chunks for document '{request.source}': {str(e)}"
         )
 
 
