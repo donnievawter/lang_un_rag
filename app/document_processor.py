@@ -186,11 +186,19 @@ class DocumentProcessor:
             # Try loading with extractors first
             try:
                 from app.extractors import extract as generic_extract
-                text = generic_extract(str(file_path))
-                if text and text.strip():
-                    documents.append(Document(page_content=text, metadata={"source": rel_source, "filename": file_path.name}))
-                else:
-                    # If extractor returns empty, try fallback
+                extraction_results = generic_extract(str(file_path))
+                if extraction_results:
+                    # extractor returns list of {"text": str, "metadata": dict}
+                    for result in extraction_results:
+                        text = result.get("text", "")
+                        if text and text.strip():
+                            result_metadata = result.get("metadata", {})
+                            # Merge metadata, with source and filename taking priority
+                            combined_metadata = {"source": rel_source, "filename": file_path.name}
+                            combined_metadata.update(result_metadata)
+                            documents.append(Document(page_content=text, metadata=combined_metadata))
+                if not documents:
+                    # If extractor returns empty results, try fallback
                     raise ValueError("No content from extractor")
             except Exception:
                 # Fallback: try markdown loader for .md files

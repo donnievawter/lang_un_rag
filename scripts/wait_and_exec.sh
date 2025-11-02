@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Wait for an executable to appear and then exec it with provided args.
 # Usage:
-#   ./wait_and_exec.sh /opt/dockerapps/lang_un_rag/.venv/bin/python3 /opt/dockerapps/lang_un_rag/scripts/watch_and_index.py --watch-dir ...
+#   ./wait_and_exec.sh /app/.venv/bin/python3 /app/scripts/watcher.py --watch-dir /app/markdown_files ...
 #
 # Environment:
 #   WAIT_TIMEOUT - seconds to wait before trying fallbacks (default 180)

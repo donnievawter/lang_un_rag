@@ -8,7 +8,7 @@ This is a local RAG (Retrieval-Augmented Generation) system that indexes documen
 - `app/main.py` - FastAPI application with REST endpoints (`/index`, `/reindex`, `/query`, `/get_chunks`, `/stats`)
 - `app/vector_store.py` - ChromaDB wrapper with custom helper methods and sentence-transformers embeddings
 - `app/document_processor.py` - Multi-format document ingestion pipeline using Unstructured + LangChain text splitters
-- `scripts/watch_and_index.py` - PollingObserver-based filesystem watcher that triggers `/index` via HTTP POST
+- `scripts/watcher.py` - Intelligent PollingObserver-based filesystem watcher with incremental operations and filename cleaning
 
 **Data Flow:**
 1. Documents → DocumentProcessor (extract/chunk) → VectorStore (embed/index) → ChromaDB collection

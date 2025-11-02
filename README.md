@@ -31,10 +31,9 @@ This README replaces the old documentation and reflects the current repository s
   - Uses Unstructured and LangChain splitting to extract and chunk document text
   - Per-chunk metadata (source, chunk_id, other file metadata)
   - Supports many file types (see "Supported file types" below)
-- Watcher sidecar (multiple options):
-  - `scripts/intelligent_watcher.py` — **NEW**: Smart incremental watcher that performs targeted operations (add/update/delete) instead of full reindex
-  - `scripts/watch_and_index.py` — Basic watcher for full reindex on any change
-  - `scripts/robust_nfs_watcher.py` — Enhanced NFS-safe watcher with checksum-based change detection
+- Watcher sidecar:
+  - `scripts/watcher.py` — Intelligent incremental watcher that performs targeted operations (add/update/delete) instead of full reindex
+  - `scripts/robust_nfs_watcher.py` — Enhanced NFS-safe watcher with checksum-based change detection (alternative)
   - Debounce + "wait for file stable" logic to avoid partial reads during large copies
   - `scripts/wait_and_exec.sh` helper to avoid venv/startup race conditions
 - Dockerized development:
@@ -81,7 +80,7 @@ Important notes about file handling:
   - vector_store.py — Chroma integration (wrapper + restored helpers)
   - query_chunks.py — query helper used by /query
 - scripts/
-  - watch_and_index.py — filesystem watcher that triggers POST to /index
+  - watcher.py — intelligent filesystem watcher that performs incremental indexing operations
   - wait_and_exec.sh — startup wrapper that waits for an appropriate python/venv
 - docker-compose.yml — primary compose file
 - docker-compose.override.yml — local override (adds watcher sidecar)
@@ -186,14 +185,17 @@ See `.env.example` for a sample configuration.
 
 ## Watcher sidecar details
 
-- Script: `scripts/watch_and_index.py`
+- Script: `scripts/watcher.py`
   - Uses Watchdog's `PollingObserver` (robust on NFS)
+  - Performs intelligent incremental operations (index_file/delete_file) instead of full reindex
+  - Includes automatic filename cleaning for problematic Unicode characters
   - CLI options:
     - `--watch-dir` (required) — directory to observe inside the container
-    - `--endpoint` — full URL to POST (e.g., `https://rag.example.com/index`)
+    - `--base-url` — API base URL (e.g., `http://rag-api:8000`)
     - `--debounce` — seconds to debounce repeated events
     - `--poll-interval` — PollingObserver interval
     - `--wait-stable` — seconds a file must be unchanged before triggering
+    - `--bulk-threshold` — number of files that triggers fallback to full reindex
     - `--insecure` — (not recommended) disable TLS verification
   - Behavior:
     - Waits for files to stabilize (size unchanged) before triggering
@@ -202,20 +204,21 @@ See `.env.example` for a sample configuration.
 - Startup wrapper: `scripts/wait_and_exec.sh`
   - Waits for the project venv/python to appear (avoids race with `uv venv` or other setup)
   - Prefers an interpreter that already has the required packages (requests/watchdog), falls back to system python if allowed
-- Example compose override snippet (recommended to mount only required dirs to avoid overlaying venv):
+  - Example compose override snippet (recommended to mount only required dirs to avoid overlaying venv):
   ```yaml
   services:
     watcher:
       command: >
-        /app/.venv/bin/python3 /opt/dockerapps/lang_un_rag/scripts/watch_and_index.py
+        /app/.venv/bin/python3 /app/scripts/watcher.py
         --watch-dir /app/markdown_files
-        --endpoint https://rag.example.com/index
+        --base-url http://rag-api:8000
         --debounce 60
         --poll-interval 5
         --wait-stable 2
+        --bulk-threshold 10
       volumes:
-        - ./scripts:/opt/dockerapps/lang_un_rag/scripts:rw
-        - ./markdown_docs:/app/markdown_files:rw
+        - ./scripts:/app/scripts:ro
+        - ./markdown_docs:/app/markdown_files:ro
   ```
 
 ---

@@ -240,7 +240,9 @@ async def get_chunks_for_document(request: GetChunksForDocumentRequest):
         GetChunksResponse with matching chunks and metadata
     """
     try:
-        chunks = vector_store.get_chunks_for_document(request.source, limit=request.limit)
+        # Convert limit=0 to None (meaning no limit)
+        limit = None if request.limit == 0 else request.limit
+        chunks = vector_store.get_chunks_for_document(request.source, limit=limit)
         
         chunk_data = [
             ChunkData(

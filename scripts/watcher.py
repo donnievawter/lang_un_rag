@@ -19,6 +19,8 @@ import logging
 import os
 import sys
 import threading
+import unicodedata
+import re
 from pathlib import Path
 from typing import Set, Optional
 import requests
@@ -44,6 +46,47 @@ except Exception as e:
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("smart_watcher")
+
+
+def clean_filename(filename: str) -> str:
+    """
+    Clean problematic Unicode characters from filename.
+    
+    - Normalizes Unicode (converts narrow no-break space U+202F to regular space)
+    - Removes or replaces other problematic characters
+    - Preserves file extension
+    
+    Returns cleaned filename.
+    """
+    # Normalize Unicode characters (NFKC converts compatible characters to canonical form)
+    normalized = unicodedata.normalize('NFKC', filename)
+    
+    # Replace any remaining problematic characters
+    # This handles various types of spaces and special characters
+    cleaned = re.sub(r'[\u00a0\u202f\u2007\u2009\u200a\u200b]+', ' ', normalized)  # Various spaces -> regular space
+    cleaned = re.sub(r'[^\w\s\-_.()\[\]]+', '', cleaned)  # Remove other special chars (keep basic punctuation)
+    cleaned = re.sub(r'\s+', ' ', cleaned)  # Multiple spaces -> single space
+    cleaned = cleaned.strip()  # Remove leading/trailing spaces
+    
+    return cleaned
+
+
+def should_clean_file(file_path: str) -> tuple[bool, str]:
+    """
+    Check if a file needs cleaning and return the cleaned path.
+    
+    Returns:
+        (needs_cleaning: bool, cleaned_path: str)
+    """
+    path = Path(file_path)
+    original_name = path.name
+    cleaned_name = clean_filename(original_name)
+    
+    if original_name != cleaned_name:
+        cleaned_path = str(path.parent / cleaned_name)
+        return True, cleaned_path
+    
+    return False, file_path
 
 
 class IntelligentHandler(FileSystemEventHandler):
@@ -253,7 +296,23 @@ class IntelligentHandler(FileSystemEventHandler):
         if not self._is_allowed_file(path):
             return
             
-        event_info = f"{file_path}::{event_type}"
+        # Clean filename if needed (for created/modified events, not deleted)
+        final_path = file_path
+        if event_type in ("created", "modified") and path.exists():
+            needs_cleaning, cleaned_path = should_clean_file(file_path)
+            if needs_cleaning:
+                try:
+                    logger.info("Renaming file with problematic characters: %s -> %s", 
+                               Path(file_path).name, Path(cleaned_path).name)
+                    os.rename(file_path, cleaned_path)
+                    final_path = cleaned_path
+                    logger.info("File renamed successfully: %s", final_path)
+                except Exception as e:
+                    logger.error("Failed to rename file %s: %s", file_path, e)
+                    # Continue with original path if rename fails
+                    final_path = file_path
+            
+        event_info = f"{final_path}::{event_type}"
         
         with self._lock:
             self._pending_events.add(event_info)

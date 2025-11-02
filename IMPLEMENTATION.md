@@ -34,13 +34,15 @@ This document explains the main components, design decisions, and operational de
      - `/stats` — `vector_store.get_collection_stats()`
      - `/query` — uses `app/query_chunks.py` (which uses `vector_store.embed_query()` + `vector_store.similarity_search_by_vector()`)
 
-4. scripts/watch_and_index.py
-   - PollingObserver-based watcher with a DebouncedHandler:
+4. scripts/watcher.py
+   - Intelligent PollingObserver-based watcher with incremental operations:
      - Waits for file stabilization (size unchanged) to avoid processing partial writes.
      - Debounces triggers using a configurable debounce window.
-     - When triggered, posts `json: {}` to the configured `--endpoint` with `Content-Type: application/json`.
+     - Performs targeted operations: index_file for created/modified files, delete_file for deletions.
+     - Automatic filename cleaning for problematic Unicode characters (Mac screenshots).
+     - Falls back to full reindex for bulk operations or individual file failures.
      - Retries with exponential backoff on transient network errors.
-   - CLI options: `--watch-dir`, `--endpoint`, `--debounce`, `--poll-interval`, `--wait-stable`, `--insecure`.
+   - CLI options: `--watch-dir`, `--base-url`, `--debounce`, `--poll-interval`, `--wait-stable`, `--bulk-threshold`.
 
 5. scripts/wait_and_exec.sh
    - Small wrapper to avoid startup races when using `uv` to create a project venv in a volume that might not exist immediately.

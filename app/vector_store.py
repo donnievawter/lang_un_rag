@@ -188,20 +188,58 @@ class VectorStore:
 
         Args:
             source_name: The source document name (from metadata['source'])
+                        Can be absolute path, relative path, or just filename
             limit: Optional limit on number of chunks to return (None means all)
 
         Returns:
             List of chunk dictionaries matching the source
         """
+        import os
+        import unicodedata
+        
+        # Normalize Unicode characters to handle space variants
+        normalized_source_name = unicodedata.normalize('NFKC', source_name)
+        
         # Get all chunks first
         all_chunks = self.get_all_chunks(limit=None)
         
-        # Filter by source
+        # Filter by source with flexible matching
         matching_chunks = []
         for chunk in all_chunks:
             metadata = chunk.get("metadata", {})
             chunk_source = metadata.get("source", "")
-            if chunk_source == source_name:
+            normalized_chunk_source = unicodedata.normalize('NFKC', chunk_source)
+            
+            # Try multiple matching strategies:
+            # 1. Exact match (after normalization)
+            if normalized_chunk_source == normalized_source_name:
+                matching_chunks.append(chunk)
+                if limit is not None and len(matching_chunks) >= limit:
+                    break
+                continue
+            
+            # 2. If source_name looks like a relative path, see if chunk_source ends with it
+            if not normalized_source_name.startswith('/') and normalized_chunk_source.endswith('/' + normalized_source_name):
+                matching_chunks.append(chunk)
+                if limit is not None and len(matching_chunks) >= limit:
+                    break
+                continue
+            
+            # 3. If source_name is absolute, see if it matches the relative part
+            if normalized_source_name.startswith('/'):
+                # Extract relative part from chunk_source (after /app/markdown_files/)
+                if '/markdown_files/' in normalized_chunk_source:
+                    relative_part = normalized_chunk_source.split('/markdown_files/')[-1]
+                    if relative_part == normalized_source_name.lstrip('/'):
+                        matching_chunks.append(chunk)
+                        if limit is not None and len(matching_chunks) >= limit:
+                            break
+                        continue
+            
+            # 4. Filename-only match (after normalization)
+            source_filename = os.path.basename(normalized_source_name)
+            chunk_filename = os.path.basename(normalized_chunk_source)
+            if source_filename == chunk_filename:
                 matching_chunks.append(chunk)
                 if limit is not None and len(matching_chunks) >= limit:
                     break

@@ -135,13 +135,14 @@ Place env values into `.env` in repo root (see `.env.example`).
 
 ## Watcher sidecar (behavior & tuning)
 
-- Script: `scripts/watch_and_index.py`
+- Script: `scripts/watcher.py`
   - Uses Watchdog's `PollingObserver` (works on NFS)
+  - Intelligent incremental operations: performs targeted index_file/delete_file instead of full reindex
+  - Automatic filename cleaning for problematic Unicode characters (e.g., Mac screenshot filenames)
   - Debounce window to avoid repeated triggers during bulk file operations
   - Waits for file size to stabilize (to avoid partial reads)
-  - Posts a JSON body `{}` with header `Content-Type: application/json` to the configured endpoint
-  - Retries with exponential backoff on transient network failures
-  - CLI opts: `--watch-dir`, `--endpoint`, `--debounce`, `--poll-interval`, `--wait-stable`, `--insecure`
+  - Falls back to full reindex for bulk operations or errors
+  - CLI opts: `--watch-dir`, `--base-url`, `--debounce`, `--poll-interval`, `--wait-stable`, `--bulk-threshold`
 - Startup wrapper: `scripts/wait_and_exec.sh`
   - Waits for project venv python to appear to avoid race conditions with `uv venv`/`uv sync`
   - Prefers a python interpreter that already has required packages (requests, watchdog)
