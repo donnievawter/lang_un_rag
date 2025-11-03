@@ -180,7 +180,13 @@ class DocumentProcessor:
         
         # Load the single file
         documents = []
-        rel_source = str(file_path)  # Use absolute path as source for consistency
+        # Use relative path for consistency with bulk indexing and /document endpoint compatibility
+        try:
+            markdown_dir = Path(settings.markdown_dir).resolve()
+            rel_source = str(file_path.relative_to(markdown_dir))
+        except (ValueError, AttributeError):
+            # Fallback to absolute path if file is outside markdown_dir or settings not available
+            rel_source = str(file_path)
         
         try:
             # Try loading with extractors first
