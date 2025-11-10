@@ -403,7 +403,6 @@ async def health_check():
     return {"status": "healthy"}
 
 
-@app.post("/document")
 @app.post("/document", response_model=DocumentResponse)
 async def get_document(request: DocumentRequest):
     """Retrieve the raw content of a document from the markdown_docs directory.
