@@ -12,12 +12,13 @@ services:
       /app/.venv/bin/python3 /app/scripts/watcher.py
       --watch-dir /app/markdown_files
       --base-url http://rag-api:8000
-      --allowed-extensions ${ALLOWED_EXTENSIONS:-md,markdown,txt,pdf,docx,pptx,html,htm,csv,png,jpg,jpeg,tiff,tif}
+      --allowed-extensions ${ALLOWED_EXTENSIONS:-md,markdown,txt,pdf,docx,pptx,html,htm,csv,png,jpg,jpeg,tiff,tif,eml,emlx}
       --debounce ${WATCHER_DEBOUNCE:-5}
       --poll-interval ${WATCHER_POLL_INTERVAL:-5}
       --wait-stable ${WATCHER_WAIT_STABLE:-2}
       --bulk-threshold ${WATCHER_BULK_THRESHOLD:-10}
       --timeout ${WATCHER_TIMEOUT:-1200}
+      --sync-interval ${WATCHER_SYNC_INTERVAL:-3600}
     environment:
       - PYTHONUNBUFFERED=1
     volumes:

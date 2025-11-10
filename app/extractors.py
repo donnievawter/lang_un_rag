@@ -49,6 +49,12 @@ from PIL import Image
 import pytesseract
 from pdf2image import convert_from_path
 
+# Email
+import email
+from email import policy
+from email.parser import BytesParser
+import re
+
 # CSV/Excel
 import pandas as pd
 
@@ -207,6 +213,123 @@ def extract_from_csv(path: str) -> List[Dict]:
         pass
     return out
 
+
+def extract_from_email(path: str) -> List[Dict]:
+    """
+    Extract text from email files (.eml, .emlx formats).
+    
+    Returns structured text with email metadata (from, to, subject, date) and body content.
+    Handles both plain text and HTML emails, stripping HTML tags for indexing.
+    """
+    out = []
+    try:
+        # Read the email file
+        with open(path, 'rb') as f:
+            # Mac .emlx files have a header line with message length, skip it
+            first_line = f.readline()
+            # If it looks like a length header (just digits), it's .emlx format
+            if first_line.strip().isdigit():
+                # Continue reading from current position (after the length line)
+                msg = BytesParser(policy=policy.default).parse(f)
+            else:
+                # Regular .eml file, rewind and parse from beginning
+                f.seek(0)
+                msg = BytesParser(policy=policy.default).parse(f)
+        
+        # Extract metadata
+        subject = msg.get('subject', '(No Subject)')
+        from_addr = msg.get('from', '(Unknown Sender)')
+        to_addr = msg.get('to', '(Unknown Recipient)')
+        date = msg.get('date', '(No Date)')
+        
+        # Extract body content
+        body_text = ""
+        if msg.is_multipart():
+            # Handle multipart messages (plain text + HTML, attachments, etc.)
+            for part in msg.walk():
+                content_type = part.get_content_type()
+                content_disposition = str(part.get('Content-Disposition', ''))
+                
+                # Skip attachments
+                if 'attachment' in content_disposition:
+                    continue
+                    
+                # Get plain text parts
+                if content_type == 'text/plain':
+                    try:
+                        text = part.get_content()
+                        if text:
+                            body_text += text + "\n"
+                    except Exception:
+                        pass
+                        
+                # Get HTML parts and convert to text
+                elif content_type == 'text/html' and not body_text:
+                    # Only use HTML if we don't have plain text
+                    try:
+                        html_content = part.get_content()
+                        # Use BeautifulSoup to extract text from HTML
+                        soup = BeautifulSoup(html_content, 'html.parser')
+                        # Remove script and style elements
+                        for script in soup(['script', 'style']):
+                            script.decompose()
+                        text = soup.get_text(separator='\n', strip=True)
+                        if text:
+                            body_text += text + "\n"
+                    except Exception:
+                        pass
+        else:
+            # Simple non-multipart message
+            content_type = msg.get_content_type()
+            if content_type == 'text/plain':
+                try:
+                    body_text = msg.get_content()
+                except Exception:
+                    pass
+            elif content_type == 'text/html':
+                try:
+                    html_content = msg.get_content()
+                    soup = BeautifulSoup(html_content, 'html.parser')
+                    for script in soup(['script', 'style']):
+                        script.decompose()
+                    body_text = soup.get_text(separator='\n', strip=True)
+                except Exception:
+                    pass
+        
+        # Clean up the body text
+        body_text = body_text.strip()
+        
+        # Construct the final text for indexing with metadata
+        email_text_parts = [
+            f"Subject: {subject}",
+            f"From: {from_addr}",
+            f"To: {to_addr}",
+            f"Date: {date}",
+            "",
+            body_text
+        ]
+        
+        final_text = "\n".join(email_text_parts)
+        
+        if final_text.strip():
+            out.append({
+                "text": final_text,
+                "metadata": {
+                    "file": os.path.basename(path),
+                    "file_type": "email",
+                    "subject": subject,
+                    "from": from_addr,
+                    "to": to_addr,
+                    "date": date
+                }
+            })
+    except Exception as e:
+        print(f"Error extracting email from {path}: {e}")
+        pass
+    
+    return out
+
+
 def extract_fallback_text(path: str) -> List[Dict]:
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -238,6 +361,9 @@ def extract(path: str) -> List[Dict]:
         if lower.endswith(".csv"):
             print(f"Processing CSV: {filename}")
             return extract_from_csv(path)
+        if lower.endswith((".eml", ".emlx")):
+            print(f"Processing Email: {filename}")
+            return extract_from_email(path)
         if lower.endswith((".png", ".jpg", ".jpeg", ".tiff", ".tif")) or (mime and mime.startswith("image/")):
             print(f"Processing Image: {filename}")
             return extract_from_image(path)

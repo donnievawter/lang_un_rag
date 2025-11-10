@@ -397,6 +397,8 @@ def main():
                        help="Number of files that triggers full reindex instead of incremental")
     parser.add_argument("--timeout", type=int, default=600,
                        help="HTTP request timeout in seconds for large file processing (default: 600)")
+    parser.add_argument("--sync-interval", type=int, default=3600,
+                       help="Interval in seconds to run periodic sync check (0 to disable, default: 3600)")
     parser.add_argument("--insecure", action="store_true", 
                        help="Disable TLS verification")
     
@@ -420,6 +422,10 @@ def main():
     logger.info(f"  Debounce: {args.debounce}s")
     logger.info(f"  Bulk threshold: {args.bulk_threshold} files")
     logger.info(f"  Request timeout: {args.timeout}s")
+    if args.sync_interval > 0:
+        logger.info(f"  Sync interval: {args.sync_interval}s ({args.sync_interval//60} minutes)")
+    else:
+        logger.info(f"  Sync interval: disabled")
     
     # Wait for API to be ready
     health_url = f"{base_url}/health"
@@ -441,11 +447,33 @@ def main():
     
     observer.schedule(handler, str(watch_dir), recursive=True)
     
+    # Track last sync time
+    last_sync = time.time()
+    
     try:
         observer.start()
         logger.info("Watcher started successfully")
         while True:
             time.sleep(1)
+            
+            # Periodic sync check
+            if args.sync_interval > 0 and time.time() - last_sync >= args.sync_interval:
+                logger.info("Running periodic sync check...")
+                try:
+                    sync_url = f"{base_url}/sync"
+                    response = requests.post(sync_url, timeout=args.timeout, verify=verify)
+                    if response.ok:
+                        result = response.json()
+                        logger.info(f"Sync complete: {result.get('files_added', 0)} added, "
+                                  f"{result.get('files_removed', 0)} removed, "
+                                  f"{result.get('files_checked', 0)} checked")
+                    else:
+                        logger.warning(f"Sync check failed: {response.status_code}")
+                except Exception as e:
+                    logger.error(f"Error during sync check: {e}")
+                finally:
+                    last_sync = time.time()
+                    
     except KeyboardInterrupt:
         logger.info("Stopping watcher...")
     finally:

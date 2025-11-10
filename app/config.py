@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     api_port: int = Field(8000, env="API_PORT")
     allowed_extensions: List[str] = Field(
         default=[".md", ".markdown", ".pdf", ".docx", ".pptx", ".html", ".htm",
-                 ".txt", ".csv", ".png", ".jpg", ".jpeg", ".tiff", ".tif"],
+                 ".txt", ".csv", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".eml", ".emlx"],
         env="ALLOWED_EXTENSIONS"
     )
 
