@@ -18,6 +18,10 @@ import warnings
 import logging
 from typing import List, Dict
 
+# Setup logger for extractors
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 # Suppress specific PDF parsing warnings
 warnings.filterwarnings("ignore", message=".*FontBBox.*")
 warnings.filterwarnings("ignore", message=".*cannot be parsed as 4 floats.*")
@@ -57,6 +61,17 @@ import re
 
 # CSV/Excel
 import pandas as pd
+
+# Audio transcription
+import requests
+import nltk
+from nltk.tokenize import sent_tokenize
+
+# Download NLTK data on first import (punkt tokenizer for sentence splitting)
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt', quiet=True)
 
 # Heuristic thresholds
 MIN_PDF_TEXT_LEN = 200  # if extracted text shorter than this, consider OCR fallback
@@ -330,6 +345,93 @@ def extract_from_email(path: str) -> List[Dict]:
     return out
 
 
+def extract_from_audio(path: str) -> List[Dict]:
+    """
+    Extract text from audio files via Whisper API transcription.
+    
+    Supports: .wav, .mp3, .m4a, .flac, .ogg
+    Returns sentence-chunked text for better semantic coherence.
+    """
+    from app.config import settings
+    
+    out = []
+    try:
+        filename = os.path.basename(path)
+        file_size = os.path.getsize(path)
+        # logger.info(f"[AUDIO] Starting transcription: {filename} (size: {file_size} bytes)")
+        # logger.info(f"[AUDIO] Whisper API URL: {settings.whisper_api_url}")
+        # logger.info(f"[AUDIO] Language: {settings.whisper_language}, Timeout: {settings.whisper_api_timeout}s")
+        
+        # Prepare the file for upload
+        with open(path, 'rb') as audio_file:
+            files = {'file': (filename, audio_file, 'audio/wav')}
+            data = {
+                'language': settings.whisper_language,
+                'task': 'transcribe'
+            }
+            
+            # logger.info(f"[AUDIO] Sending request to Whisper API...")
+            # Call Whisper API
+            response = requests.post(
+                settings.whisper_api_url,
+                files=files,
+                data=data,
+                timeout=settings.whisper_api_timeout
+            )
+            # logger.info(f"[AUDIO] Received response: status={response.status_code}")
+            response.raise_for_status()
+        
+        # Parse JSON response: {"text": str, "language": str, "duration": float}
+        # logger.info(f"[AUDIO] Parsing JSON response...")
+        result = response.json()
+        transcribed_text = result.get('text', '').strip()
+        detected_language = result.get('language', settings.whisper_language)
+        duration = result.get('duration', 0)
+        
+        # logger.info(f"[AUDIO] Transcription received: {len(transcribed_text)} chars, language={detected_language}, duration={duration}s")
+        
+        if not transcribed_text:
+            logger.warning(f"[AUDIO] Warning: No text transcribed from {filename}")
+            return []
+        
+        # Split into sentences for better chunking
+        # logger.info(f"[AUDIO] Tokenizing into sentences...")
+        sentences = sent_tokenize(transcribed_text)
+        # logger.info(f"[AUDIO] Found {len(sentences)} sentences")
+        
+        # Group sentences into reasonable chunks (avoid single-sentence chunks)
+        # Aim for ~3-5 sentences per chunk
+        chunk_size = 4
+        for i in range(0, len(sentences), chunk_size):
+            chunk_sentences = sentences[i:i + chunk_size]
+            chunk_text = ' '.join(chunk_sentences)
+            
+            out.append({
+                "text": chunk_text,
+                "metadata": {
+                    "file": filename,
+                    "file_type": "audio",
+                    "language": detected_language,
+                    "duration": duration,
+                    "chunk_id": i // chunk_size
+                }
+            })
+        
+        # logger.info(f"[AUDIO] Created {len(out)} chunks from {filename}")
+        # logger.info(f"[AUDIO] SUCCESS: Transcribed {filename}: {len(sentences)} sentences in {len(out)} chunks")
+        
+    except requests.exceptions.Timeout:
+        logger.error(f"[AUDIO] ERROR: Whisper API timeout for {os.path.basename(path)} (>{settings.whisper_api_timeout}s)")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"[AUDIO] ERROR: Whisper API request failed for {os.path.basename(path)}: {e}")
+    except Exception as e:
+        import traceback
+        logger.error(f"[AUDIO] ERROR: Exception transcribing audio {os.path.basename(path)}: {e}")
+        logger.error(f"[AUDIO] Traceback: {traceback.format_exc()}")
+    
+    return out
+
+
 def extract_fallback_text(path: str) -> List[Dict]:
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
@@ -344,7 +446,7 @@ def extract(path: str) -> List[Dict]:
     mime = detect_mime(path) or ""
     lower = path.lower()
     filename = os.path.basename(path)
-    
+    print(f"Detected MIME type for {filename}: {mime}")
     try:
         if lower.endswith(".pdf") or (mime and mime.startswith("application/pdf")):
             print(f"Processing PDF: {filename}")
@@ -364,6 +466,9 @@ def extract(path: str) -> List[Dict]:
         if lower.endswith((".eml", ".emlx")):
             print(f"Processing Email: {filename}")
             return extract_from_email(path)
+        if lower.endswith((".wav", ".mp3", ".m4a", ".flac", ".ogg")) or (mime and mime.startswith("audio/")):
+            print(f"Processing Audio: {filename}")
+            return extract_from_audio(path)
         if lower.endswith((".png", ".jpg", ".jpeg", ".tiff", ".tif")) or (mime and mime.startswith("image/")):
             print(f"Processing Image: {filename}")
             return extract_from_image(path)

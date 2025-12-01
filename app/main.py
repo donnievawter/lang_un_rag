@@ -475,10 +475,11 @@ async def index_single_file(request: IncrementalRequest):
     """
     try:
         file_path = request.file_path.strip().lstrip('/')
-        
+        #logger.info(f"in main.py.index)signle_file Indexing single file: {file_path}")
         # Construct full path
         markdown_dir = Path(settings.markdown_dir).resolve()
         full_path = markdown_dir / file_path
+
         
         # Security check
         try:
@@ -504,6 +505,7 @@ async def index_single_file(request: IncrementalRequest):
             )
         
         # Check if file extension is allowed
+        #logger.info(f"Allowed extensions: {settings.allowed_extensions}")
         if full_path.suffix.lower() not in settings.allowed_extensions:
             return IncrementalResponse(
                 status="skipped",

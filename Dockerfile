@@ -31,6 +31,9 @@ RUN pip install --no-cache-dir sentence-transformers
 # Install remaining dependencies with pip
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download NLTK punkt tokenizer data for sentence splitting
+RUN python -c "import nltk; nltk.download('punkt', quiet=True); nltk.download('punkt_tab', quiet=True)"
+
 # Copy application code
 COPY app ./app
 ARG SENTENCE_TRANSFORMER_MODEL=all-mpnet-base-v2

@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     api_port: int = Field(8000, env="API_PORT")
     allowed_extensions: List[str] = Field(
         default=[".md", ".markdown", ".pdf", ".docx", ".pptx", ".html", ".htm",
-                 ".txt", ".csv", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".eml", ".emlx"],
+                 ".txt", ".csv", ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".eml", ".emlx",
+                 ".wav", ".mp3", ".m4a", ".flac", ".ogg"],
         env="ALLOWED_EXTENSIONS"
     )
 
@@ -25,6 +26,11 @@ class Settings(BaseSettings):
 
     # Optional sentence-transformers model name (Hugging Face / sentence-transformers)
     sentence_transformer_model: Optional[str] = Field(None, env="SENTENCE_TRANSFORMER_MODEL")
+
+    # Whisper API Configuration (for audio transcription)
+    whisper_api_url: str = Field("https://whisper.hlab.cam/transcribe", env="WHISPER_API_URL")
+    whisper_api_timeout: int = Field(300, env="WHISPER_API_TIMEOUT")
+    whisper_language: str = Field("en", env="WHISPER_LANGUAGE")
 
     # pydantic-settings configuration: env file and encoding
     model_config = {

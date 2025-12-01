@@ -8,7 +8,10 @@ from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from langchain_core.documents import Document
 
 from app.config import settings
-
+import logging
+# Setup logger for extractors
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 # If you later want token-aware chunking, replace with tiktoken-based splitter
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=0)
 
@@ -90,10 +93,12 @@ class DocumentProcessor:
         for file_path in candidate_files:
             if self._is_excluded(file_path, docs_dir, exclude_dirs):
                 # skip files in excluded directories
+                print(f"Excluding file in excluded dir: {file_path}")
                 continue
 
             try:
                 suffix = file_path.suffix.lower()
+                print(f"Processing file: {suffix} - {file_path}")
                 rel_source = str(file_path.relative_to(docs_dir))
                 print(f"Loading document: {rel_source}")
                 # Markdown: use UnstructuredMarkdownLoader to preserve structure
@@ -108,6 +113,7 @@ class DocumentProcessor:
 
                 # For non-markdown types: use the extractors module if available
                 if generic_extract:
+                    print(f"Using generic extractor for: {file_path}")
                     pieces = generic_extract(str(file_path))
                     for p in pieces:
                         text = p.get("text", "")
@@ -163,7 +169,7 @@ class DocumentProcessor:
             List of chunked Document objects
         """
         file_path = Path(file_path)
-        
+        #logger.info(f"Processing single file: {file_path}")
         # Validate file
         if not file_path.exists():
             raise ValueError(f"File {file_path} does not exist")
@@ -176,6 +182,7 @@ class DocumentProcessor:
         ])}
         
         if file_path.suffix.lower() not in allowed_exts:
+            logger.info(f"Skipping unsupported file: {file_path}")
             return []  # Skip unsupported files
         
         # Load the single file
@@ -193,6 +200,7 @@ class DocumentProcessor:
             try:
                 from app.extractors import extract as generic_extract
                 extraction_results = generic_extract(str(file_path))
+                #logger.info(f"Extraction results for {file_path}: {extraction_results}")
                 if extraction_results:
                     # extractor returns list of {"text": str, "metadata": dict}
                     for result in extraction_results:

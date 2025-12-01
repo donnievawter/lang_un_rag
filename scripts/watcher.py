@@ -170,7 +170,7 @@ class IntelligentHandler(FileSystemEventHandler):
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
         max_attempts = 3
         backoff = 1
-        
+        logger.info(f"Making request to {url} with payload: {json.dumps(payload)[:200]}")  
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(
@@ -216,6 +216,7 @@ class IntelligentHandler(FileSystemEventHandler):
                 return
                 
             # Index or update the file
+            logger.info(f"Indexing file: {relative_path}")
             success = self._make_request(
                 "index_file",
                 {"file_path": relative_path},
@@ -280,6 +281,7 @@ class IntelligentHandler(FileSystemEventHandler):
         for event_info in pending:
             try:
                 file_path, event_type = event_info.split("::", 1)
+                logger.info(f"Processing event: {event_type} - {file_path}")
                 self._process_file_event(file_path, event_type)
             except Exception as e:
                 logger.error(f"Error processing event {event_info}: {e}")

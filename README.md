@@ -60,6 +60,10 @@ The document ingestion pipeline has been extended beyond Markdown and now accept
 - Images (text extraction requires OCR)
   - .png, .jpg, .jpeg, .tif, .tiff
   - (OCR via pytesseract + pillow/pdf2image where appropriate)
+- Audio (transcription via external Whisper API)
+  - .wav, .mp3, .m4a, .flac, .ogg
+  - Transcription uses sentence-based chunking for better semantic coherence
+  - Requires configured Whisper API endpoint (see Configuration section)
 - Other
   - Any file types for which Unstructured or installed loaders provide support; the pipeline will attempt to extract text where possible.
 
@@ -164,6 +168,11 @@ Settings are read by `app/config.py` via pydantic. Key environment variables (se
 - `OLLAMA_MODEL` — model used for embeddings, if configured
 - `API_HOST` — host to bind (default: `0.0.0.0`)
 - `API_PORT` — port to bind (default: `8000`)
+
+### Audio Transcription (Whisper API)
+- `WHISPER_API_URL` — Whisper API endpoint (default: `https://whisper.hlab.cam/transcribe`)
+- `WHISPER_API_TIMEOUT` — API request timeout in seconds (default: `300`)
+- `WHISPER_LANGUAGE` — language code for transcription (default: `en`)
 
 ### Watcher Configuration
 - `WATCHER_DEBOUNCE` — seconds to debounce index calls (default: `60`)
