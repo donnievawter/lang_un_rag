@@ -1,9 +1,10 @@
 """FastAPI application for the RAG system."""
 import os
 import logging
+import mimetypes
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel, Field
 
 from app.config import settings
@@ -131,6 +132,17 @@ class IncrementalResponse(BaseModel):
     chunks_affected: int
     message: str
 
+
+class UploadResponse(BaseModel):
+    """Response model for file upload."""
+    status: str
+    filename: str
+    saved_path: str
+    size_bytes: int
+    file_type: str
+    message: str
+
+
 @app.get("/")
 async def root():
     """Root endpoint."""
@@ -143,8 +155,10 @@ async def root():
             "/sync": "Sync filesystem with vector store (only index missing/remove deleted files)",
             "/index_file": "Index or update a single file incrementally",
             "/delete_file": "Remove a file's chunks from the index",
+            "/upload": "Upload a file to be automatically indexed by the watcher",
             "/get_chunks": "Retrieve indexed chunks",
             "/get_chunks_for_document": "Retrieve chunks for a specific document source",
+            "/documents": "Get list of all indexed documents",
             "/stats": "Get collection statistics",
             "/query": "Perform similarity search on indexed documents",
             "/document": "Retrieve raw content of a specific document",
@@ -625,6 +639,110 @@ async def delete_file_from_index(request: IncrementalRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Error deleting file from index: {str(e)}"
+        )
+
+
+@app.post("/upload", response_model=UploadResponse)
+async def upload_file(file: UploadFile = File(...)):
+    """Upload a file to be automatically ingested by the watcher.
+    
+    The file will be saved to the 'uploads/<extension>' directory within the watched folder,
+    organized by file type, and the watcher will automatically detect and index it.
+    
+    Args:
+        file: The uploaded file
+        
+    Returns:
+        UploadResponse with upload details
+    """
+    try:
+        # Get original filename
+        filename = file.filename or "unnamed_file"
+        
+        # Sanitize filename (remove path components for security)
+        filename = Path(filename).name
+        
+        # Determine file extension
+        file_ext = Path(filename).suffix.lower()
+        
+        # Remove the leading dot for directory name
+        ext_dir_name = file_ext.lstrip('.') if file_ext else 'unknown'
+        
+        # Create uploads/extension directory if it doesn't exist
+        markdown_dir = Path(settings.markdown_dir).resolve()
+        uploads_dir = markdown_dir / "uploads" / ext_dir_name
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Guess MIME type and general file type
+        mime_type, _ = mimetypes.guess_type(filename)
+        
+        # Determine general file type category
+        if file_ext in ['.pdf']:
+            file_type = 'pdf'
+        elif file_ext in ['.docx', '.doc']:
+            file_type = 'docx'
+        elif file_ext in ['.pptx', '.ppt']:
+            file_type = 'pptx'
+        elif file_ext in ['.md', '.markdown']:
+            file_type = 'markdown'
+        elif file_ext in ['.txt']:
+            file_type = 'text'
+        elif file_ext in ['.html', '.htm']:
+            file_type = 'html'
+        elif file_ext in ['.csv']:
+            file_type = 'csv'
+        elif file_ext in ['.png', '.jpg', '.jpeg', '.tiff', '.tif']:
+            file_type = 'image'
+        elif file_ext in ['.wav', '.mp3', '.m4a', '.flac', '.ogg']:
+            file_type = 'audio'
+        elif file_ext in ['.eml', '.emlx']:
+            file_type = 'email'
+        else:
+            file_type = 'unknown'
+        
+        # Check if file extension is allowed
+        if file_ext and file_ext not in settings.allowed_extensions:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File type '{file_ext}' not allowed. Allowed types: {', '.join(settings.allowed_extensions)}"
+            )
+        
+        # Construct save path
+        save_path = uploads_dir / filename
+        
+        # Handle filename conflicts by adding a number
+        counter = 1
+        original_stem = save_path.stem
+        while save_path.exists():
+            save_path = uploads_dir / f"{original_stem}_{counter}{file_ext}"
+            counter += 1
+        
+        # Save the file
+        content = await file.read()
+        size_bytes = len(content)
+        
+        with open(save_path, 'wb') as f:
+            f.write(content)
+        
+        # Get relative path for response
+        relative_path = save_path.relative_to(markdown_dir)
+        
+        return UploadResponse(
+            status="success",
+            filename=save_path.name,
+            saved_path=str(relative_path),
+            size_bytes=size_bytes,
+            file_type=file_type,
+            message=f"File uploaded successfully to {relative_path}. The watcher will automatically index it shortly."
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error uploading file: {str(e)}"
         )
 
 

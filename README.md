@@ -17,9 +17,12 @@ This README replaces the old documentation and reflects the current repository s
   - `GET /health` — basic health check
   - `POST /index` — process and index supported files from the configured directory
   - `POST /reindex` — clear and reindex all files
-  - `POST /index_file` — **NEW**: incrementally index or update a single file
-  - `POST /delete_file` — **NEW**: remove a specific file's chunks from the index
+  - `POST /index_file` — incrementally index or update a single file
+  - `POST /delete_file` — remove a specific file's chunks from the index
+  - `POST /upload` — **NEW**: upload files via API for automatic indexing
+  - `GET /documents` — **NEW**: list all indexed documents with metadata
   - `GET /get_chunks` — enumerate stored chunks (supports `?limit=N`)
+  - `POST /get_chunks_for_document` — retrieve chunks for a specific document
   - `GET /stats` — collection statistics
   - `POST /query` — run a similarity query (RAG)
   - `POST /document` — retrieve raw content of a specific document by file path
@@ -143,6 +146,13 @@ Notes:
 
 5. Test other endpoints:
    ```bash
+   # Upload a file for automatic indexing
+   curl -X POST "http://localhost:2700/upload" \
+     -F "file=@/path/to/document.pdf"
+   
+   # List all indexed documents
+   curl -X GET "http://localhost:2700/documents"
+   
    # Query for similar documents
    curl -X POST "http://localhost:2700/query" \
      -H "Content-Type: application/json" \
@@ -152,7 +162,51 @@ Notes:
    curl -X POST "http://localhost:2700/document" \
      -H "Content-Type: application/json" \
      -d '{"file_path": "example.md"}'
+   
+   # Get chunks for a specific document
+   curl -X POST "http://localhost:2700/get_chunks_for_document" \
+     -H "Content-Type: application/json" \
+     -d '{"source": "uploads/pdf/document.pdf"}'
    ```
+
+---
+
+## File Upload Feature
+
+The `/upload` endpoint allows programmatic file uploads that are automatically indexed by the watcher:
+
+**Upload via API:**
+```bash
+curl -X POST "http://localhost:2700/upload" -F "file=@document.pdf"
+```
+
+**Python example:**
+```python
+import requests
+
+with open('document.pdf', 'rb') as f:
+    files = {'file': f}
+    response = requests.post('http://localhost:2700/upload', files=files)
+    print(response.json())
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "filename": "document.pdf",
+  "saved_path": "uploads/pdf/document.pdf",
+  "size_bytes": 1177988,
+  "file_type": "pdf",
+  "message": "File uploaded successfully to uploads/pdf/document.pdf. The watcher will automatically index it shortly."
+}
+```
+
+**File Organization:**
+- Uploaded files are automatically organized by extension in `uploads/<extension>/` directories
+- Examples: `uploads/pdf/`, `uploads/md/`, `uploads/jpg/`, `uploads/wav/`, etc.
+- The watcher recursively monitors these directories and automatically indexes new files
+- Duplicate filenames are handled by appending a counter (e.g., `document_1.pdf`)
 
 ---
 
