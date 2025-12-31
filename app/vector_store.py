@@ -332,6 +332,34 @@ class VectorStore:
 
         return stats
 
+    def get_indexed_documents(self) -> List[Dict[str, Any]]:
+        """Return a list of unique documents that have been indexed.
+        
+        Returns:
+            List of dicts with document info: {"source": str, "chunk_count": int, "file_type": str}
+        """
+        try:
+            all_chunks = self.get_all_chunks(limit=None)
+            
+            # Group chunks by source
+            doc_map = {}
+            for chunk in all_chunks:
+                source = chunk.get("metadata", {}).get("source")
+                if source:
+                    if source not in doc_map:
+                        doc_map[source] = {
+                            "source": source,
+                            "chunk_count": 0,
+                            "file_type": chunk.get("metadata", {}).get("file_type", "unknown")
+                        }
+                    doc_map[source]["chunk_count"] += 1
+            
+            # Return sorted list by source name
+            return sorted(doc_map.values(), key=lambda x: x["source"])
+        except Exception as e:
+            logger.error(f"Error getting indexed documents: {e}")
+            return []
+
     def add_documents_incremental(self, documents: List[Document]) -> Dict[str, Any]:
         """Add new documents to the existing collection without clearing it first.
         

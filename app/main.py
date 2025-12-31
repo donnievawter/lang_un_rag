@@ -72,6 +72,20 @@ class CollectionStatsResponse(BaseModel):
     document_count: int
     persist_directory: str
 
+
+class DocumentInfo(BaseModel):
+    """Model for indexed document information."""
+    source: str
+    chunk_count: int
+    file_type: str
+
+
+class GetDocumentsResponse(BaseModel):
+    """Response model for get_documents endpoint."""
+    total_documents: int
+    documents: List[DocumentInfo]
+
+
 class QueryRequest(BaseModel):
     prompt: str
     k: Optional[int] = 5
@@ -379,6 +393,26 @@ async def get_stats():
         raise HTTPException(
             status_code=500,
             detail=f"Error retrieving stats: {str(e)}"
+        )
+
+
+@app.get("/documents", response_model=GetDocumentsResponse)
+async def get_documents():
+    """Get a list of all indexed documents.
+    
+    Returns:
+        GetDocumentsResponse with list of documents and their metadata
+    """
+    try:
+        documents = vector_store.get_indexed_documents()
+        return GetDocumentsResponse(
+            total_documents=len(documents),
+            documents=[DocumentInfo(**doc) for doc in documents]
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error retrieving indexed documents: {str(e)}"
         )
 
 
